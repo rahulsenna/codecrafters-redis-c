@@ -70,7 +70,23 @@ if (fork()==0)
 		while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 		{
 			printf("req_buf: %s\n", req_buf);
-			write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));	
+			char *smthing = strtok(req_buf, "\r\n");
+			char *smthing2 = strtok(0, "\r\n");
+			char *command = strtok(0, "\r\n");
+			printf("command: %s\n", command);
+
+			if (strncmp(command, "PING", strlen("PING"))==0)
+			{
+				write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));				
+			}
+			if (strncmp(command, "ECHO", strlen("ECHO"))==0)
+			{
+				
+				char *input = command + strlen("ECHO\r\n$5\r");
+				*input = '+';
+
+				write(client_sock, input, strlen(input));
+			}
 		}
 }		
 	}

@@ -61,6 +61,8 @@ int main() {
 			perror("Accept Failed\n");
 			continue;
 		}
+if (fork()==0)
+{
 		printf("Client connected\n");
 		
 		char req_buf[1024];
@@ -70,7 +72,7 @@ int main() {
 			printf("req_buf: %s\n", req_buf);
 			write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));	
 		}
-		
+}		
 	}
 	
 	

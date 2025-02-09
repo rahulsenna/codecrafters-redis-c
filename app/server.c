@@ -7,6 +7,121 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define TABLE_SIZE 100
+
+typedef struct Entry {
+    char* key;
+    char* value;
+    struct Entry* next;
+} Entry;
+
+typedef struct HashMap {
+    Entry* table[TABLE_SIZE];
+} HashMap;
+
+// Hash function using djb2 algorithm
+unsigned int hash(const char* str) {
+    unsigned int hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c;
+    }
+    return hash % TABLE_SIZE;
+}
+
+// Create new hashmap
+HashMap* hashmap_create() {
+    HashMap* map = (HashMap*)malloc(sizeof(HashMap));
+    if (map == NULL) return NULL;
+    
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        map->table[i] = NULL;
+    }
+    return map;
+}
+
+// Insert or update key-value pair
+void hashmap_put(HashMap* map, const char* key, const char* value) {
+    unsigned int index = hash(key);
+    Entry* current = map->table[index];
+    
+    // Check if key already exists
+    while (current != NULL) {
+        if (strcmp(current->key, key) == 0) {
+            // Update value
+            free(current->value);
+            current->value = strdup(value);
+            return;
+        }
+        current = current->next;
+    }
+    
+    // Create new entry
+    Entry* newEntry = (Entry*)malloc(sizeof(Entry));
+    if (newEntry == NULL) return;
+    
+    newEntry->key = strdup(key);
+    newEntry->value = strdup(value);
+    newEntry->next = map->table[index];
+    map->table[index] = newEntry;
+}
+
+// Get value by key
+char* hashmap_get(HashMap* map, const char* key) {
+    unsigned int index = hash(key);
+    Entry* current = map->table[index];
+    
+    while (current != NULL) {
+        if (strcmp(current->key, key) == 0) {
+            return current->value;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+// Remove key-value pair
+void hashmap_remove(HashMap* map, const char* key) {
+    unsigned int index = hash(key);
+    Entry* current = map->table[index];
+    Entry* prev = NULL;
+    
+    while (current != NULL) {
+        if (strcmp(current->key, key) == 0) {
+            if (prev == NULL) {
+                map->table[index] = current->next;
+            } else {
+                prev->next = current->next;
+            }
+            free(current->key);
+            free(current->value);
+            free(current);
+            return;
+        }
+        prev = current;
+        current = current->next;
+    }
+}
+
+// Free hashmap and all entries
+void hashmap_free(HashMap* map) {
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        Entry* current = map->table[i];
+        while (current != NULL) {
+            Entry* next = current->next;
+            free(current->key);
+            free(current->value);
+            free(current);
+            current = next;
+        }
+    }
+    free(map);
+}
+
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -53,6 +168,8 @@ int main() {
 	
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
+
+	HashMap* map = hashmap_create();
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -79,14 +196,48 @@ if (fork()==0)
 			{
 				write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));				
 			}
-			if (strncmp(command, "ECHO", strlen("ECHO"))==0)
+			else if (strncmp(command, "ECHO", strlen("ECHO"))==0)
 			{
-				
-				char *input = command + strlen("ECHO\r\n$5\r");
-				*input = '+';
+				strtok(0, "$");
+				strtok(0, "\r\n");
+				char *input = strtok(0, "\r\n");
+				input--;
+				input[0] = '+';
+				input[strlen(input)]='\r';
 
 				write(client_sock, input, strlen(input));
 			}
+			else if (strncmp(command, "SET", strlen("SET"))==0)
+			{
+//--------------[ KEY ]---------------------------------------------
+
+				strtok(0, "$");
+				strtok(0, "\r\n");
+				char *key = strtok(0, "\r\n");
+//--------------[ VALUE ]---------------------------------------------
+				strtok(0, "$");
+				strtok(0, "\r\n");
+				char *val = strtok(0, "\r\n");
+				val--;
+				val[0] = '+';
+				val[strlen(val)]='\r';
+//--------------[  ]---------------------------------------------
+
+				hashmap_put(map, key, val);
+				write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
+			}
+			else if (strncmp(command, "GET", strlen("GET"))==0)
+			{
+				strtok(0, "$");
+				strtok(0, "\r\n");
+				char *key = strtok(0, "\r\n");
+				char *val = hashmap_get(map, key);
+				if (val)
+					write(client_sock, val, strlen(val));
+				else
+					write(client_sock, "$-1\r\n", strlen("$-1\r\n"));
+			}
+
 		}
 }		
 	}

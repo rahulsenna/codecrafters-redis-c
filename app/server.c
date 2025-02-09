@@ -56,8 +56,7 @@ int main() {
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-		write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));
-		if (client_sock != -1)
+		if (client_sock == -1)
 		{ 
 			perror("Accept Failed\n");
 			continue;
@@ -65,8 +64,13 @@ int main() {
 		printf("Client connected\n");
 		
 		char req_buf[1024];
-		size_t bytes_read = read(client_sock, req_buf, sizeof(req_buf));
-		printf("req_buf: %s\n", req_buf);
+		size_t bytes_read;
+		while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
+		{
+			printf("req_buf: %s\n", req_buf);
+			write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));	
+		}
+		
 	}
 	
 	

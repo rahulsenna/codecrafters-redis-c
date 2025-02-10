@@ -6,6 +6,18 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <limits.h>
+
+#include<sys/time.h>
+
+long long get_curr_time(void) 
+{
+    struct timeval tv;
+
+    gettimeofday(&tv,NULL);
+    return (((long long)tv.tv_sec)*1000)+(tv.tv_usec/1000);
+}
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -170,6 +182,7 @@ int main() {
 	client_addr_len = sizeof(client_addr);
 
 	HashMap* map = hashmap_create();
+	HashMap* timestamps = hashmap_create();
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -183,63 +196,72 @@ if (fork()==0)
 		printf("Client connected\n");
 		
 		char req_buf[1024];
+		char output_buf[1024];
 		size_t bytes_read;
 		while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 		{
-			printf("req_buf: %s\n", req_buf);
-			char *smthing = strtok(req_buf, "\r\n");
-			char *smthing2 = strtok(0, "\r\n");
-			char *command = strtok(0, "\r\n");
-			printf("command: %s\n", command);
+			char *query = req_buf+1;
+			int query_cnt = atoi(strtok(query, "\r\n"));
+			char *tokens[10];
+			for (int i = 0; i < query_cnt; ++i)
+			{
+				 char *chr_cnt = strtok(0, "\r\n");
+				 char *token = strtok(0, "\r\n");
+				 tokens[i] = token;
+			}
 
+			char *command = tokens[0];
 			if (strncmp(command, "PING", strlen("PING"))==0)
 			{
 				write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));				
 			}
 			else if (strncmp(command, "ECHO", strlen("ECHO"))==0)
 			{
-				strtok(0, "$");
-				strtok(0, "\r\n");
-				char *input = strtok(0, "\r\n");
-				input--;
-				input[0] = '+';
-				input[strlen(input)]='\r';
-
-				write(client_sock, input, strlen(input));
+				snprintf(output_buf, sizeof(output_buf), "+%s\r\n", tokens[1]);
+				write(client_sock, output_buf, strlen(output_buf));
 			}
-			else if (strncmp(command, "SET", strlen("SET"))==0)
+			else if (strncmp(command, "SET", strlen("SET")) == 0)
 			{
-//--------------[ KEY ]---------------------------------------------
-
-				strtok(0, "$");
-				strtok(0, "\r\n");
-				char *key = strtok(0, "\r\n");
-//--------------[ VALUE ]---------------------------------------------
-				strtok(0, "$");
-				strtok(0, "\r\n");
-				char *val = strtok(0, "\r\n");
-				val--;
-				val[0] = '+';
-				val[strlen(val)]='\r';
-//--------------[  ]---------------------------------------------
-
-				hashmap_put(map, key, val);
 				write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
+				hashmap_put(map, tokens[1], tokens[2]);
+				if (tokens[3] && strncmp(tokens[3], "px", strlen("px"))==0)
+				{
+					long long curr_time = get_curr_time();
+					long long expired_on = curr_time+atoll(tokens[4]);
+					char time[100];
+					snprintf(time, 100, "%lld", expired_on);
+					hashmap_put(timestamps, tokens[1], time);
+				} else
+				{
+					char time[100];
+					snprintf(time, 100, "%lld", INT64_MAX);
+					hashmap_put(timestamps, tokens[1], time);
+				}
 			}
 			else if (strncmp(command, "GET", strlen("GET"))==0)
 			{
-				strtok(0, "$");
-				strtok(0, "\r\n");
-				char *key = strtok(0, "\r\n");
-				char *val = hashmap_get(map, key);
+				char *val = hashmap_get(map, tokens[1]);
+				char *timestamp_str = hashmap_get(timestamps, tokens[1]);
+				if (timestamp_str)
+				{
+					long long curr_time = get_curr_time();
+					long long exp_time = atoll(timestamp_str);
+					if (curr_time>exp_time)
+						val = 0;
+				}
+
 				if (val)
-					write(client_sock, val, strlen(val));
+				{
+					snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val);
+					write(client_sock, output_buf, strlen(output_buf));	
+				}
 				else
 					write(client_sock, "$-1\r\n", strlen("$-1\r\n"));
 			}
 
 		}
-}		
+}
+	close(client_sock);
 	}
 	
 	

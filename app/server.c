@@ -28,6 +28,7 @@ long long get_curr_time(void)
 typedef struct Entry {
     char* key;
     char* value;
+	long long expiry;
     struct Entry* next;
 } Entry;
 
@@ -57,7 +58,7 @@ HashMap* hashmap_create() {
 }
 
 // Insert or update key-value pair
-void hashmap_put(HashMap* map, const char* key, const char* value) {
+void hashmap_put(HashMap* map, const char* key, const char* value, long long expiry) {
     unsigned int index = hash(key);
     Entry* current = map->table[index];
     
@@ -78,6 +79,7 @@ void hashmap_put(HashMap* map, const char* key, const char* value) {
     
     newEntry->key = strdup(key);
     newEntry->value = strdup(value);
+	newEntry->expiry = expiry;
     newEntry->next = map->table[index];
     map->table[index] = newEntry;
 }
@@ -90,6 +92,22 @@ char* hashmap_get(HashMap* map, const char* key) {
     while (current != NULL) {
         if (strcmp(current->key, key) == 0) {
             return current->value;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+Entry* hashmap_get_entry(HashMap* map, const char* key)
+{
+    unsigned int index = hash(key);
+    Entry* current = map->table[index];
+    
+    while (current != NULL)
+	{
+        if (strcmp(current->key, key) == 0)
+		{
+            return current;
         }
         current = current->next;
     }
@@ -182,7 +200,7 @@ int main() {
 	client_addr_len = sizeof(client_addr);
 
 	HashMap* map = hashmap_create();
-	HashMap* timestamps = hashmap_create();
+
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -223,36 +241,22 @@ if (fork()==0)
 			else if (strncmp(command, "SET", strlen("SET")) == 0)
 			{
 				write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
-				hashmap_put(map, tokens[1], tokens[2]);
+				long long expiry_time = INT64_MAX;
 				if (tokens[3] && strncmp(tokens[3], "px", strlen("px"))==0)
 				{
 					long long curr_time = get_curr_time();
-					long long expired_on = curr_time+atoll(tokens[4]);
-					char time[100];
-					snprintf(time, 100, "%lld", expired_on);
-					hashmap_put(timestamps, tokens[1], time);
-				} else
-				{
-					char time[100];
-					snprintf(time, 100, "%lld", INT64_MAX);
-					hashmap_put(timestamps, tokens[1], time);
+					expiry_time = curr_time+atoll(tokens[4]);
 				}
+
+				hashmap_put(map, tokens[1], tokens[2], expiry_time);
 			}
 			else if (strncmp(command, "GET", strlen("GET"))==0)
 			{
-				char *val = hashmap_get(map, tokens[1]);
-				char *timestamp_str = hashmap_get(timestamps, tokens[1]);
-				if (timestamp_str)
+				Entry *val = hashmap_get_entry(map, tokens[1]);
+				
+				if (val && val->expiry > get_curr_time())
 				{
-					long long curr_time = get_curr_time();
-					long long exp_time = atoll(timestamp_str);
-					if (curr_time>exp_time)
-						val = 0;
-				}
-
-				if (val)
-				{
-					snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val);
+					snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val->value);
 					write(client_sock, output_buf, strlen(output_buf));	
 				}
 				else

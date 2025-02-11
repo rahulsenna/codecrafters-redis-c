@@ -234,6 +234,8 @@ int main(int argc, char *argv[]) {
 	char redis_file_path[1024];
 	snprintf(redis_file_path, sizeof(redis_file_path), "%s/%s", config[ArgDirName], config[ArgFileName]);
 	FILE *rdbfile = fopen(redis_file_path, "rb");
+	if (rdbfile == 0)
+		goto END_FILE_READ;
 	unsigned char buffer[1024 * 10];
 	size_t bytes_read = fread(buffer, sizeof(unsigned char), 1024 * 10, rdbfile);
 	printf("bytes_read: %lu\n", bytes_read);
@@ -266,7 +268,7 @@ int main(int argc, char *argv[]) {
 
 		printf("%s:%s\n", key,value);
 	}
-
+END_FILE_READ:
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);

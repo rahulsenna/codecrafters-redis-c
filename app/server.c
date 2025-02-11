@@ -186,7 +186,6 @@ int main(int argc, char *argv[]) {
 
 	printf("Config[ArgDirName]: %s\n", config[ArgDirName]);
 	printf("Config[ArgFileName]: %s\n", config[ArgFileName]);
-	
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	printf("Logs from your program will appear here!\n");
 
@@ -230,6 +229,24 @@ int main(int argc, char *argv[]) {
 	client_addr_len = sizeof(client_addr);
 
 	HashMap* map = hashmap_create();
+
+
+	char redis_file_path[1024];
+	snprintf(redis_file_path, sizeof(redis_file_path), "%s/%s", config[ArgDirName], config[ArgFileName]);
+	FILE *rdbfile = fopen(redis_file_path, "rb");
+	unsigned char buffer[1024 * 10];
+	size_t bytes_read = fread(buffer, sizeof(unsigned char), 1024 * 10, rdbfile);
+	printf("bytes_read: %lu\n", bytes_read);
+
+	int byte_idx = 0;
+	while(buffer[byte_idx] != 0xfb)
+		byte_idx++;
+	
+	byte_idx+=4; // skip 4 bytes of info
+
+	int keylen = (int) buffer[byte_idx++];
+	char key[256];
+	strncpy(key, (char *)buffer + byte_idx, keylen);
 
 	while(1)
 	{
@@ -307,6 +324,15 @@ if (fork()==0)
 
 					}
 				}
+			}
+			else if (strncmp(tokens[0], "KEYS", strlen("KEYS"))==0)
+			{
+				
+				char out[1024];
+				snprintf(out, sizeof(out), "*1\r\n$%d\r\n%s\r\n", keylen, key);
+
+				write(client_sock, out, strlen(out));
+				fclose(rdbfile);
 			}
 
 		}

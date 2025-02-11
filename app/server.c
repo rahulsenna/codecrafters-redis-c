@@ -241,12 +241,31 @@ int main(int argc, char *argv[]) {
 	int byte_idx = 0;
 	while(buffer[byte_idx] != 0xfb)
 		byte_idx++;
-	
-	byte_idx+=4; // skip 4 bytes of info
 
-	int keylen = (int) buffer[byte_idx++];
-	char key[256];
-	strncpy(key, (char *)buffer + byte_idx, keylen);
+	int db_map_size = (int)buffer[byte_idx + 1];
+	char *keys[100];
+
+	byte_idx+=4; // skip 4 bytes of info
+	char value[256];
+
+	for (int i = 0; i < db_map_size; ++i)
+	{
+		//--------[ Key ]--------------------------------------------------------------
+		int key_len = (int)buffer[byte_idx++];
+		char *key = malloc(sizeof(char)*key_len);
+		strncpy(key, (char *)buffer + byte_idx, key_len);
+		keys[i] = key;
+
+		//--------[ Value ]--------------------------------------------------------------
+		byte_idx += key_len;
+		int val_len = (int)buffer[byte_idx++];
+		strncpy(value, (char *)buffer + byte_idx, val_len);
+		value[val_len]=0;
+		hashmap_put(map, key, value, INT64_MAX);
+		byte_idx += val_len+1;
+
+		printf("%s:%s\n", key,value);
+	}
 
 	while(1)
 	{
@@ -329,7 +348,11 @@ if (fork()==0)
 			{
 				
 				char out[1024];
-				snprintf(out, sizeof(out), "*1\r\n$%d\r\n%s\r\n", keylen, key);
+				snprintf(out, sizeof(out), "*%d\r\n", db_map_size);
+				for (int i = 0; i < db_map_size; ++i)
+				{
+					snprintf(out, sizeof(out), "%s$%lu\r\n%s\r\n",out, strlen(keys[i]), keys[i]);
+				}
 
 				write(client_sock, out, strlen(out));
 				fclose(rdbfile);

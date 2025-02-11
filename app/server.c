@@ -152,10 +152,40 @@ void hashmap_free(HashMap* map) {
     free(map);
 }
 
-int main() {
+typedef enum 
+{
+	ArgDirName = 0x0,
+	ArgFileName,
+	ArgCount,
+} ArgType;
+
+char *config[ArgCount] = {0};
+
+
+int main(int argc, char *argv[]) {
 	// Disable output buffering
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
+
+	for (int i = 0; i < ArgCount; ++i)
+	{
+		config[i] = 0;
+	}
+	for (int i = 1; i < argc; i+=2)
+	{
+		if (strncmp(argv[i], "--dir", strlen("--dir")) == 0)
+		{
+			config[ArgDirName] = argv[i+1];
+		}
+
+		if (strncmp(argv[i], "--dbfilename", strlen("--dbfilename")) == 0)
+		{
+			config[ArgFileName] = argv[i+1];
+		}
+	}
+
+	printf("Config[ArgDirName]: %s\n", config[ArgDirName]);
+	printf("Config[ArgFileName]: %s\n", config[ArgFileName]);
 	
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	printf("Logs from your program will appear here!\n");
@@ -226,6 +256,7 @@ if (fork()==0)
 				 char *chr_cnt = strtok(0, "\r\n");
 				 char *token = strtok(0, "\r\n");
 				 tokens[i] = token;
+				 printf("tokens[%d]: %s\n",i, tokens[i]);
 			}
 
 			char *command = tokens[0];
@@ -261,6 +292,21 @@ if (fork()==0)
 				}
 				else
 					write(client_sock, "$-1\r\n", strlen("$-1\r\n"));
+			}
+			else if (strncmp(tokens[0], "CONFIG", strlen("CONFIG"))==0)
+			{
+				if (strncmp(tokens[1], "GET", strlen("GET"))==0)
+				{
+					if (strncmp(tokens[2], "dir", strlen("dir"))==0)
+					{
+						snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
+								 strlen("dir"), "dir",
+								 strlen(config[ArgDirName]), config[ArgDirName]);
+
+						write(client_sock, output_buf, strlen(output_buf));	
+
+					}
+				}
 			}
 
 		}

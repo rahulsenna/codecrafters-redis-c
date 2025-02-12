@@ -11,12 +11,12 @@
 
 #include<sys/time.h>
 
-long long get_curr_time(void) 
+uint64_t get_curr_time(void) 
 {
     struct timeval tv;
 
     gettimeofday(&tv,NULL);
-    return (((long long)tv.tv_sec)*1000)+(tv.tv_usec/1000);
+    return (((uint64_t)tv.tv_sec)*1000)+(tv.tv_usec/1000);
 }
 
 #include <stdio.h>
@@ -28,7 +28,7 @@ long long get_curr_time(void)
 typedef struct Entry {
     char* key;
     char* value;
-	long long expiry;
+	uint64_t expiry;
     struct Entry* next;
 } Entry;
 
@@ -58,7 +58,7 @@ HashMap* hashmap_create() {
 }
 
 // Insert or update key-value pair
-void hashmap_put(HashMap* map, const char* key, const char* value, long long expiry) {
+void hashmap_put(HashMap* map, const char* key, const char* value, uint64_t expiry) {
     unsigned int index = hash(key);
     Entry* current = map->table[index];
     
@@ -161,6 +161,83 @@ typedef enum
 
 char *config[ArgCount] = {0};
 
+int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
+{
+	FILE *rdbfile = fopen(redis_file_path, "rb");
+	if (rdbfile == 0)
+		return 0;
+	unsigned char buffer[1024 * 10];
+	size_t bytes_read = fread(buffer, sizeof(unsigned char), 1024 * 10, rdbfile);
+	printf("bytes_read: %lu\n", bytes_read);
+
+	int byte_idx = 0;
+	while(buffer[byte_idx] != 0xfb)
+		byte_idx++;
+
+	int db_map_size = (int)buffer[byte_idx + 1];
+	int db_expiry_map_size = (int)buffer[byte_idx + 2];
+
+	byte_idx+=3; // skip 2 bytes of size info
+
+	char value[256];
+	char timestamp_str[256];
+	for (int i = 0; i < db_map_size; ++i)
+	{
+
+		uint64_t timestamp = 0;
+		if (i < db_expiry_map_size)
+		{
+			uint8_t exp_type= buffer[byte_idx++];
+			if (exp_type == 0xFC)
+			{
+				byte_idx += 8;
+				snprintf(timestamp_str, sizeof(timestamp_str),
+						 "%02X%02X%02X%02X%02X%02X%02X%02X",
+						 buffer[byte_idx - 1], buffer[byte_idx - 2], buffer[byte_idx - 3], buffer[byte_idx - 4],
+						 buffer[byte_idx - 5], buffer[byte_idx - 6], buffer[byte_idx - 7], buffer[byte_idx - 8]);
+				timestamp = strtoull(timestamp_str, NULL, 16);
+			}
+			else if (exp_type == 0xFD)
+			{
+				byte_idx += 4;
+				snprintf(timestamp_str, sizeof(timestamp_str),
+						 "%02X%02X%02X%02X%02X%02X%02X%02X",
+						 0, 0, 0, 0,
+						 buffer[byte_idx - 1], buffer[byte_idx - 2], buffer[byte_idx - 3], buffer[byte_idx - 4]);
+				timestamp = strtoull(timestamp_str, NULL, 16) *1000ULL;
+			}
+		}
+				 
+		uint8_t encoding = buffer[byte_idx++]; // encodings 0=string
+		
+
+		//--------[ Key ]--------------------------------------------------------------
+		int key_len = (int)buffer[byte_idx++];
+		char *key = malloc(sizeof(char)*key_len);
+		strncpy(key, (char *)buffer + byte_idx, key_len);
+
+		//--------[ Value ]--------------------------------------------------------------
+		byte_idx += key_len;
+		int val_len = (int)buffer[byte_idx++];
+		strncpy(value, (char *)buffer + byte_idx, val_len);
+		value[val_len]=0;
+
+		if (timestamp && timestamp > get_curr_time())
+		{
+			hashmap_put(map, key, value, timestamp);
+		}
+		else if (timestamp == 0)
+		{
+			hashmap_put(map, key, value, UINT64_MAX);
+		}
+		keys[i] = key;
+			
+		byte_idx += val_len;
+	}
+
+	fclose(rdbfile);
+	return db_map_size;
+}
 
 int main(int argc, char *argv[]) {
 	// Disable output buffering
@@ -233,42 +310,10 @@ int main(int argc, char *argv[]) {
 
 	char redis_file_path[1024];
 	snprintf(redis_file_path, sizeof(redis_file_path), "%s/%s", config[ArgDirName], config[ArgFileName]);
-	FILE *rdbfile = fopen(redis_file_path, "rb");
-	if (rdbfile == 0)
-		goto END_FILE_READ;
-	unsigned char buffer[1024 * 10];
-	size_t bytes_read = fread(buffer, sizeof(unsigned char), 1024 * 10, rdbfile);
-	printf("bytes_read: %lu\n", bytes_read);
-
-	int byte_idx = 0;
-	while(buffer[byte_idx] != 0xfb)
-		byte_idx++;
-
-	int db_map_size = (int)buffer[byte_idx + 1];
 	char *keys[100];
 
-	byte_idx+=4; // skip 4 bytes of info
-	char value[256];
+	int db_map_size = read_rdb_file(redis_file_path, map, keys);
 
-	for (int i = 0; i < db_map_size; ++i)
-	{
-		//--------[ Key ]--------------------------------------------------------------
-		int key_len = (int)buffer[byte_idx++];
-		char *key = malloc(sizeof(char)*key_len);
-		strncpy(key, (char *)buffer + byte_idx, key_len);
-		keys[i] = key;
-
-		//--------[ Value ]--------------------------------------------------------------
-		byte_idx += key_len;
-		int val_len = (int)buffer[byte_idx++];
-		strncpy(value, (char *)buffer + byte_idx, val_len);
-		value[val_len]=0;
-		hashmap_put(map, key, value, INT64_MAX);
-		byte_idx += val_len+1;
-
-		printf("%s:%s\n", key,value);
-	}
-END_FILE_READ:
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -310,10 +355,10 @@ if (fork()==0)
 			else if (strncmp(command, "SET", strlen("SET")) == 0)
 			{
 				write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
-				long long expiry_time = INT64_MAX;
+				uint64_t expiry_time = UINT64_MAX;
 				if (tokens[3] && strncmp(tokens[3], "px", strlen("px"))==0)
 				{
-					long long curr_time = get_curr_time();
+					uint64_t curr_time = get_curr_time();
 					expiry_time = curr_time+atoll(tokens[4]);
 				}
 
@@ -357,7 +402,7 @@ if (fork()==0)
 				}
 
 				write(client_sock, out, strlen(out));
-				fclose(rdbfile);
+				
 			}
 
 		}

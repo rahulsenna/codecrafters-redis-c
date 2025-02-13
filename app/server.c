@@ -412,7 +412,18 @@ if (fork()==0)
 			else if ((strncmp(tokens[0], "INFO", strlen("INFO"))==0))
 			{
 				if (port == replication_port)
-					snprintf(output_buf, sizeof(output_buf), "$11\r\nrole:master\r\n");
+				{
+					snprintf(output_buf, sizeof(output_buf),
+							 "$%lu\r\n"
+							 "role:master\r\n"
+							 "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
+							 "master_repl_offset:0"
+							 "\r\n",
+							 strlen(
+								 "role:master\r\n"
+								 "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
+								 "master_repl_offset:0"));
+				}
 				else				
 					snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
 			}

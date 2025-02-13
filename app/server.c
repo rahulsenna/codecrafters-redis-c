@@ -351,16 +351,14 @@ if (fork()==0)
 			char *command = tokens[0];
 			if (strncmp(command, "PING", strlen("PING"))==0)
 			{
-				write(client_sock, "+PONG\r\n", strlen("+PONG\r\n"));				
+				snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
 			}
 			else if (strncmp(command, "ECHO", strlen("ECHO"))==0)
 			{
 				snprintf(output_buf, sizeof(output_buf), "+%s\r\n", tokens[1]);
-				write(client_sock, output_buf, strlen(output_buf));
 			}
 			else if (strncmp(command, "SET", strlen("SET")) == 0)
 			{
-				write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
 				uint64_t expiry_time = UINT64_MAX;
 				if (tokens[3] && strncmp(tokens[3], "px", strlen("px"))==0)
 				{
@@ -369,6 +367,7 @@ if (fork()==0)
 				}
 
 				hashmap_put(map, tokens[1], tokens[2], expiry_time);
+				snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 			}
 			else if (strncmp(command, "GET", strlen("GET"))==0)
 			{
@@ -377,10 +376,9 @@ if (fork()==0)
 				if (val && val->expiry > get_curr_time())
 				{
 					snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val->value);
-					write(client_sock, output_buf, strlen(output_buf));	
 				}
 				else
-					write(client_sock, "$-1\r\n", strlen("$-1\r\n"));
+					snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
 			}
 			else if (strncmp(tokens[0], "CONFIG", strlen("CONFIG"))==0)
 			{
@@ -391,24 +389,16 @@ if (fork()==0)
 						snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
 								 strlen("dir"), "dir",
 								 strlen(config[ArgDirName]), config[ArgDirName]);
-
-						write(client_sock, output_buf, strlen(output_buf));	
-
 					}
 				}
 			}
 			else if (strncmp(tokens[0], "KEYS", strlen("KEYS"))==0)
 			{
-				
-				char out[1024];
-				snprintf(out, sizeof(out), "*%d\r\n", db_map_size);
+				snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
 				for (int i = 0; i < db_map_size; ++i)
 				{
-					snprintf(out, sizeof(out), "%s$%lu\r\n%s\r\n",out, strlen(keys[i]), keys[i]);
-				}
-
-				write(client_sock, out, strlen(out));
-				
+					snprintf(output_buf, sizeof(output_buf), "%s$%lu\r\n%s\r\n",output_buf, strlen(keys[i]), keys[i]);
+				}				
 			}
 			else if ((strncmp(tokens[0], "INFO", strlen("INFO"))==0))
 			{

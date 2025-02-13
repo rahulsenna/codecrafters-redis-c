@@ -156,6 +156,7 @@ typedef enum
 {
 	ArgDirName = 0x0,
 	ArgFileName,
+	ArgReplicationHost,
 	ArgCount,
 } ArgType;
 
@@ -238,6 +239,25 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 	fclose(rdbfile);
 	return db_map_size;
 }
+void handshake(int replication_port)
+{
+	struct sockaddr_in master_addr = {
+		.sin_family = AF_INET,
+		.sin_port = htons(replication_port),
+		.sin_addr.s_addr = INADDR_ANY,
+	};
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+
+	if (connect(sock, (struct sockaddr *)&master_addr, sizeof(master_addr)) == -1)
+	{
+		perror("Connect Failed\n");
+	}
+	else
+	{
+		write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));
+		close(sock);
+	}
+}
 
 int main(int argc, char *argv[]) {
 	// Disable output buffering
@@ -250,19 +270,15 @@ int main(int argc, char *argv[]) {
 	}
 
 	int port = 6379;
-	char replication_str[1024] = "";
 	int replication_port = 0;
 
 	for (int i = 1; i < argc; i+=2)
 	{
 		if (strncmp(argv[i], "--replicaof", strlen("--replicaof")) == 0)
-    {
-      printf("argv[%d]: %s\n", i, argv[i+1]);
-      snprintf(replication_str, sizeof(replication_str), "%s", argv[i+1]);
-      strtok(argv[i+1], " ");
-      replication_port = atoi(strtok(0, " "));
-      printf("replication_port: %d\n", replication_port);
-    }
+		{
+			config[ArgReplicationHost] = argv[i + 1];
+			sscanf(argv[i + 1], "%*s %d", &replication_port);
+		}
 		if (strncmp(argv[i], "--port", strlen("--port")) == 0)
 		{
 			port = atoi(argv[i+1]);
@@ -315,21 +331,7 @@ int main(int argc, char *argv[]) {
 	
 	if (replication_port)
 	{
-		struct sockaddr_in master_addr = {
-			.sin_family = AF_INET,
-			.sin_port = htons(replication_port),
-			.sin_addr.s_addr = INADDR_ANY,
-		};
-		int sock = socket(AF_INET, SOCK_STREAM, 0);
-
-		if (connect(sock, (struct sockaddr *)&master_addr, sizeof(master_addr)) == -1)
-		{ 
-			perror("Connect Failed\n");
-		} else
-		{
-			write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));	
-			close(sock);
-		}
+		handshake(replication_port);
 	}	
 	int connection_backlog = 5;
 	if (listen(server_fd, connection_backlog) != 0) {

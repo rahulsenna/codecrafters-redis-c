@@ -248,9 +248,11 @@ int main(int argc, char *argv[]) {
 	{
 		config[i] = 0;
 	}
+
 	int port = 6379;
-  char replication_str[1024] = "";
-  int replication_port = port;
+	char replication_str[1024] = "";
+	int replication_port = 0;
+
 	for (int i = 1; i < argc; i+=2)
 	{
 		if (strncmp(argv[i], "--replicaof", strlen("--replicaof")) == 0)
@@ -311,6 +313,24 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 	
+	if (replication_port)
+	{
+		struct sockaddr_in master_addr = {
+			.sin_family = AF_INET,
+			.sin_port = htons(replication_port),
+			.sin_addr.s_addr = INADDR_ANY,
+		};
+		int sock = socket(AF_INET, SOCK_STREAM, 0);
+
+		if (connect(sock, (struct sockaddr *)&master_addr, sizeof(master_addr)) == -1)
+		{ 
+			perror("Connect Failed\n");
+		} else
+		{
+			write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));	
+			close(sock);
+		}
+	}	
 	int connection_backlog = 5;
 	if (listen(server_fd, connection_backlog) != 0) {
 		printf("Listen failed: %s \n", strerror(errno));
@@ -411,7 +431,7 @@ if (fork()==0)
 			}
 			else if ((strncmp(tokens[0], "INFO", strlen("INFO"))==0))
 			{
-				if (port == replication_port)
+				if (replication_port == 0)
 				{
 					snprintf(output_buf, sizeof(output_buf),
 							 "$%lu\r\n"

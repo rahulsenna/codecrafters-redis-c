@@ -410,7 +410,12 @@ if (fork()==0)
 				write(client_sock, out, strlen(out));
 				
 			}
+			else if ((strncmp(tokens[0], "INFO", strlen("INFO"))==0))
+			{
+				snprintf(output_buf, sizeof(output_buf), "$11\r\nrole:master\r\n");
+			}
 
+			write(client_sock, output_buf, strlen(output_buf));
 		}
 }
 	close(client_sock);

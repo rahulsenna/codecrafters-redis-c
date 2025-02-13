@@ -249,9 +249,18 @@ int main(int argc, char *argv[]) {
 		config[i] = 0;
 	}
 	int port = 6379;
-
+  char replication_str[1024] = "";
+  int replication_port = port;
 	for (int i = 1; i < argc; i+=2)
 	{
+		if (strncmp(argv[i], "--replicaof", strlen("--replicaof")) == 0)
+    {
+      printf("argv[%d]: %s\n", i, argv[i+1]);
+      snprintf(replication_str, sizeof(replication_str), "%s", argv[i+1]);
+      strtok(argv[i+1], " ");
+      replication_port = atoi(strtok(0, " "));
+      printf("replication_port: %d\n", replication_port);
+    }
 		if (strncmp(argv[i], "--port", strlen("--port")) == 0)
 		{
 			port = atoi(argv[i+1]);
@@ -402,7 +411,10 @@ if (fork()==0)
 			}
 			else if ((strncmp(tokens[0], "INFO", strlen("INFO"))==0))
 			{
-				snprintf(output_buf, sizeof(output_buf), "$11\r\nrole:master\r\n");
+				if (port == replication_port)
+					snprintf(output_buf, sizeof(output_buf), "$11\r\nrole:master\r\n");
+				else				
+					snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
 			}
 
 			write(client_sock, output_buf, strlen(output_buf));

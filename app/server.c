@@ -248,8 +248,14 @@ int main(int argc, char *argv[]) {
 	{
 		config[i] = 0;
 	}
+	int port = 6379;
+
 	for (int i = 1; i < argc; i+=2)
 	{
+		if (strncmp(argv[i], "--port", strlen("--port")) == 0)
+		{
+			port = atoi(argv[i+1]);
+		}
 		if (strncmp(argv[i], "--dir", strlen("--dir")) == 0)
 		{
 			config[ArgDirName] = argv[i+1];
@@ -287,7 +293,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	struct sockaddr_in serv_addr = { .sin_family = AF_INET ,
-									 .sin_port = htons(6379),
+									 .sin_port = htons(port),
 									 .sin_addr = { htonl(INADDR_ANY) },
 									};
 	

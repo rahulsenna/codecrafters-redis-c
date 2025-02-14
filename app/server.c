@@ -471,6 +471,10 @@ if (fork()==0)
 				else				
 					snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
 			}
+			else if ((strncmp(tokens[0], "REPLCONF", strlen("REPLCONF"))==0))
+			{
+				snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+			}
 
 			write(client_sock, output_buf, strlen(output_buf));
 		}

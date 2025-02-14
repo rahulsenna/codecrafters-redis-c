@@ -475,6 +475,10 @@ if (fork()==0)
 			{
 				snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 			}
+			else if ((strncmp(tokens[0], "PSYNC", strlen("PSYNC"))==0))
+			{
+				snprintf(output_buf, sizeof(output_buf), "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n");
+			}
 
 			write(client_sock, output_buf, strlen(output_buf));
 		}

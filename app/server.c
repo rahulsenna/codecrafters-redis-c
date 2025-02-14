@@ -271,7 +271,13 @@ void handshake(int replication_port)
 	write(sock,
 		"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n",
 		strlen("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
-	);	
+	);
+
+	read(sock, buf, sizeof(buf));
+	write(sock,
+		  "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n",
+		  strlen("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"));
+
 	close(sock);
 }
 

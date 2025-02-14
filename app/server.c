@@ -251,12 +251,28 @@ void handshake(int replication_port)
 	if (connect(sock, (struct sockaddr *)&master_addr, sizeof(master_addr)) == -1)
 	{
 		perror("Connect Failed\n");
+		return;
 	}
-	else
+	
+	write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));
+	char buf[1024];
+	read(sock, buf, sizeof(buf));
+	if (strncmp(buf, "+PONG", strlen("+PONG")) != 0)
 	{
-		write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));
-		close(sock);
+		perror("Pong Failed\n");
+		return;
 	}
+	write(sock, 
+		"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n",
+		strlen("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n")
+	);
+
+	read(sock, buf, sizeof(buf));
+	write(sock,
+		"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n",
+		strlen("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+	);	
+	close(sock);
 }
 
 int main(int argc, char *argv[]) {

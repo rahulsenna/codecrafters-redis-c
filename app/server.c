@@ -281,6 +281,136 @@ void handshake(int replication_port)
 	close(sock);
 }
 
+#include <pthread.h>
+HashMap* map;
+int db_map_size, replication_port;
+char *keys[100];
+int replica_socks[10] = {0};
+int replica_socks_cnt = 0;
+void *handle_client(void *arg)
+{
+	int client_sock = *(int *)arg;
+    free(arg);
+    printf("Client connected\n");
+
+    char req_buf[1024];
+    char req_buf2[1024];
+    char output_buf[1024];
+    size_t bytes_read;
+	int this_is_replica = 0;
+	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
+	{
+		memcpy(req_buf2, req_buf, 1024);
+		char *query = req_buf + 1;
+		int query_cnt = atoi(strtok(query, "\r\n"));
+		char *tokens[10];
+		for (int i = 0; i < query_cnt; ++i)
+		{
+			char *chr_cnt = strtok(0, "\r\n");
+			char *token = strtok(0, "\r\n");
+			tokens[i] = token;
+			printf("tokens[%d]: %s\n", i, tokens[i]);
+		}
+
+		char *command = tokens[0];
+		if (strncmp(command, "PING", strlen("PING")) == 0)
+		{
+			snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
+		}
+		else if (strncmp(command, "ECHO", strlen("ECHO")) == 0)
+		{
+			snprintf(output_buf, sizeof(output_buf), "+%s\r\n", tokens[1]);
+		}
+		else if (strncmp(command, "SET", strlen("SET")) == 0)
+		{
+			uint64_t expiry_time = UINT64_MAX;
+			if (tokens[3] && strncmp(tokens[3], "px", strlen("px")) == 0)
+			{
+				uint64_t curr_time = get_curr_time();
+				expiry_time = curr_time + atoll(tokens[4]);
+			}
+
+			hashmap_put(map, tokens[1], tokens[2], expiry_time);
+			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+			
+			for (int i = 0; i < replica_socks_cnt; ++i)
+			{
+				write(replica_socks[i], req_buf2, strlen(req_buf2)); 
+			}
+		}
+		else if (strncmp(command, "GET", strlen("GET")) == 0)
+		{
+			Entry *val = hashmap_get_entry(map, tokens[1]);
+
+			if (val && val->expiry > get_curr_time())
+			{
+				snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val->value);
+			}
+			else
+				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+		}
+		else if (strncmp(tokens[0], "CONFIG", strlen("CONFIG")) == 0)
+		{
+			if (strncmp(tokens[1], "GET", strlen("GET")) == 0)
+			{
+				if (strncmp(tokens[2], "dir", strlen("dir")) == 0)
+				{
+					snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
+							 strlen("dir"), "dir",
+							 strlen(config[ArgDirName]), config[ArgDirName]);
+				}
+			}
+		}
+		else if (strncmp(tokens[0], "KEYS", strlen("KEYS")) == 0)
+		{
+			snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
+			for (int i = 0; i < db_map_size; ++i)
+			{
+				snprintf(output_buf, sizeof(output_buf), "%s$%lu\r\n%s\r\n", output_buf, strlen(keys[i]), keys[i]);
+			}
+		}
+		else if ((strncmp(tokens[0], "INFO", strlen("INFO")) == 0))
+		{
+			if (replication_port == 0)
+			{
+				snprintf(output_buf, sizeof(output_buf),
+						 "$%lu\r\n"
+						 "role:master\r\n"
+						 "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
+						 "master_repl_offset:0"
+						 "\r\n",
+						 strlen(
+							 "role:master\r\n"
+							 "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
+							 "master_repl_offset:0"));
+			}
+			else
+				snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
+		}
+		else if ((strncmp(tokens[0], "REPLCONF", strlen("REPLCONF")) == 0))
+		{
+			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+		}
+		else if ((strncmp(tokens[0], "PSYNC", strlen("PSYNC")) == 0))
+		{
+			snprintf(output_buf, sizeof(output_buf), "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n");
+			write(client_sock, output_buf, strlen(output_buf));
+			write(client_sock,
+				  "$88\r\n\x52\x45\x44\x49\x53\x30\x30\x31\x31\xfa\x09\x72\x65\x64\x69\x73\x2d\x76\x65\x72\x05\x37\x2e\x32\x2e\x30\xfa\x0a\x72\x65\x64\x69\x73\x2d\x62\x69\x74\x73\xc0\x40\xfa\x05\x63\x74\x69\x6d\x65\xc2\x6d\x08\xbc\x65\xfa\x08\x75\x73\x65\x64\x2d\x6d\x65\x6d\xc2\xb0\xc4\x10\x00\xfa\x08\x61\x6f\x66\x2d\x62\x61\x73\x65\xc0\x00\xff\xf0\x6e\x3b\xfe\xc0\xff\x5a\xa2",
+				  88 + 5);
+			replica_socks[replica_socks_cnt++] = client_sock;
+			this_is_replica = 1;
+			printf("replica_sock: %d\n", client_sock);
+			continue;
+		}
+
+		write(client_sock, output_buf, strlen(output_buf));
+	}
+
+	close(client_sock);
+	return NULL;
+}
+
 int main(int argc, char *argv[]) {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -292,7 +422,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	int port = 6379;
-	int replication_port = 0;
+	replication_port = 0;
 
 	for (int i = 1; i < argc; i+=2)
 	{
@@ -364,15 +494,15 @@ int main(int argc, char *argv[]) {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 
-	HashMap* map = hashmap_create();
+	map = hashmap_create();
 
 
 	char redis_file_path[1024];
 	snprintf(redis_file_path, sizeof(redis_file_path), "%s/%s", config[ArgDirName], config[ArgFileName]);
-	char *keys[100];
+	
 
-	int db_map_size = read_rdb_file(redis_file_path, map, keys);
-
+	db_map_size = read_rdb_file(redis_file_path, map, keys);
+    
 	while(1)
 	{
 		int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -381,119 +511,27 @@ int main(int argc, char *argv[]) {
 			perror("Accept Failed\n");
 			continue;
 		}
-if (fork()==0)
-{
-		printf("Client connected\n");
-		
-		char req_buf[1024];
-		char output_buf[1024];
-		size_t bytes_read;
-		while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
+
+		// Pass client socket to thread
+		int *client_sock_ptr = malloc(sizeof(int));
+		*client_sock_ptr = client_sock;
+
+		pthread_t thread_id;
+		if (pthread_create(&thread_id, NULL, handle_client, client_sock_ptr) != 0)
 		{
-			char *query = req_buf+1;
-			int query_cnt = atoi(strtok(query, "\r\n"));
-			char *tokens[10];
-			for (int i = 0; i < query_cnt; ++i)
-			{
-				 char *chr_cnt = strtok(0, "\r\n");
-				 char *token = strtok(0, "\r\n");
-				 tokens[i] = token;
-				 printf("tokens[%d]: %s\n",i, tokens[i]);
-			}
-
-			char *command = tokens[0];
-			if (strncmp(command, "PING", strlen("PING"))==0)
-			{
-				snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
-			}
-			else if (strncmp(command, "ECHO", strlen("ECHO"))==0)
-			{
-				snprintf(output_buf, sizeof(output_buf), "+%s\r\n", tokens[1]);
-			}
-			else if (strncmp(command, "SET", strlen("SET")) == 0)
-			{
-				uint64_t expiry_time = UINT64_MAX;
-				if (tokens[3] && strncmp(tokens[3], "px", strlen("px"))==0)
-				{
-					uint64_t curr_time = get_curr_time();
-					expiry_time = curr_time+atoll(tokens[4]);
-				}
-
-				hashmap_put(map, tokens[1], tokens[2], expiry_time);
-				snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
-			}
-			else if (strncmp(command, "GET", strlen("GET"))==0)
-			{
-				Entry *val = hashmap_get_entry(map, tokens[1]);
-				
-				if (val && val->expiry > get_curr_time())
-				{
-					snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val->value);
-				}
-				else
-					snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
-			}
-			else if (strncmp(tokens[0], "CONFIG", strlen("CONFIG"))==0)
-			{
-				if (strncmp(tokens[1], "GET", strlen("GET"))==0)
-				{
-					if (strncmp(tokens[2], "dir", strlen("dir"))==0)
-					{
-						snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
-								 strlen("dir"), "dir",
-								 strlen(config[ArgDirName]), config[ArgDirName]);
-					}
-				}
-			}
-			else if (strncmp(tokens[0], "KEYS", strlen("KEYS"))==0)
-			{
-				snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
-				for (int i = 0; i < db_map_size; ++i)
-				{
-					snprintf(output_buf, sizeof(output_buf), "%s$%lu\r\n%s\r\n",output_buf, strlen(keys[i]), keys[i]);
-				}				
-			}
-			else if ((strncmp(tokens[0], "INFO", strlen("INFO"))==0))
-			{
-				if (replication_port == 0)
-				{
-					snprintf(output_buf, sizeof(output_buf),
-							 "$%lu\r\n"
-							 "role:master\r\n"
-							 "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
-							 "master_repl_offset:0"
-							 "\r\n",
-							 strlen(
-								 "role:master\r\n"
-								 "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb\r\n"
-								 "master_repl_offset:0"));
-				}
-				else				
-					snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
-			}
-			else if ((strncmp(tokens[0], "REPLCONF", strlen("REPLCONF"))==0))
-			{
-				snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
-			}
-			else if ((strncmp(tokens[0], "PSYNC", strlen("PSYNC"))==0))
-			{
-				snprintf(output_buf, sizeof(output_buf), "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n");
-				write(client_sock, output_buf, strlen(output_buf));
-				write(client_sock,
-				"$88\r\n\x52\x45\x44\x49\x53\x30\x30\x31\x31\xfa\x09\x72\x65\x64\x69\x73\x2d\x76\x65\x72\x05\x37\x2e\x32\x2e\x30\xfa\x0a\x72\x65\x64\x69\x73\x2d\x62\x69\x74\x73\xc0\x40\xfa\x05\x63\x74\x69\x6d\x65\xc2\x6d\x08\xbc\x65\xfa\x08\x75\x73\x65\x64\x2d\x6d\x65\x6d\xc2\xb0\xc4\x10\x00\xfa\x08\x61\x6f\x66\x2d\x62\x61\x73\x65\xc0\x00\xff\xf0\x6e\x3b\xfe\xc0\xff\x5a\xa2",
-				88+5);
-				continue;
-			}
-
-			write(client_sock, output_buf, strlen(output_buf));
+			perror("Thread creation failed");
+			close(client_sock);
+			free(client_sock_ptr);
+			continue;
 		}
-}
-	close(client_sock);
+
+		// Detach the thread to auto-cleanup when done
+		pthread_detach(thread_id);
 	}
 	
 	
 	
 	close(server_fd);
-
+       
 	return 0;
 }

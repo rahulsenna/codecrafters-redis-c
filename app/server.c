@@ -239,7 +239,11 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 	fclose(rdbfile);
 	return db_map_size;
 }
-void handshake(int replication_port)
+
+int db_map_size, replication_port, port;
+HashMap* map;
+
+void *handshake()
 {
 	struct sockaddr_in master_addr = {
 		.sin_family = AF_INET,
@@ -251,7 +255,7 @@ void handshake(int replication_port)
 	if (connect(sock, (struct sockaddr *)&master_addr, sizeof(master_addr)) == -1)
 	{
 		perror("Connect Failed\n");
-		return;
+		return 0;
 	}
 	
 	write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));
@@ -260,7 +264,7 @@ void handshake(int replication_port)
 	if (strncmp(buf, "+PONG", strlen("+PONG")) != 0)
 	{
 		perror("Pong Failed\n");
-		return;
+		return 0;
 	}
 	write(sock, 
 		"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n",
@@ -278,12 +282,54 @@ void handshake(int replication_port)
 		  "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n",
 		  strlen("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"));
 
+	size_t bytes_read;
+	bytes_read = read(sock, buf, sizeof(buf));
+	if (bytes_read <= strlen("+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n"))
+	{
+		bytes_read = read(sock, buf, sizeof(buf));
+	}
+	
+	while(1)
+	{
+		while ((bytes_read = read(sock, buf, sizeof(buf))))
+		{
+			char *token, *saveptr;
+			char *chr_cnt = strtok_r(buf, "\r\n", &saveptr);
+			size_t distance;
+			do
+			{
+				int query_cnt = atoi(chr_cnt + 1);
+				char *tokens[10];
+				for (int i = 0; i < query_cnt; ++i)
+				{
+					chr_cnt = strtok_r(0, "\r\n", &saveptr);
+					token = strtok_r(0, "\r\n", &saveptr);
+					tokens[i] = token;
+				}
+
+				char *command = tokens[0];
+				if (strncmp(command, "SET", strlen("SET")) == 0)
+				{
+					uint64_t expiry_time = UINT64_MAX;
+					if (tokens[3] && strncmp(tokens[3], "px", strlen("px")) == 0)
+					{
+						uint64_t curr_time = get_curr_time();
+						expiry_time = curr_time + atoll(tokens[4]);
+					}
+					hashmap_put(map, tokens[1], tokens[2], expiry_time);
+				}
+				chr_cnt = strtok_r(0, "\r\n", &saveptr);
+				distance = chr_cnt - buf;
+			} while (chr_cnt && distance < bytes_read);
+		}
+	}
+
 	close(sock);
+
+	return 0;
 }
 
 #include <pthread.h>
-HashMap* map;
-int db_map_size, replication_port;
 char *keys[100];
 int replica_socks[10] = {0};
 int replica_socks_cnt = 0;
@@ -291,7 +337,8 @@ void *handle_client(void *arg)
 {
 	int client_sock = *(int *)arg;
     free(arg);
-    printf("Client connected\n");
+    printf("Client connected - port: %d\n", port);
+
 
     char req_buf[1024];
     char req_buf2[1024];
@@ -302,14 +349,15 @@ void *handle_client(void *arg)
 	{
 		memcpy(req_buf2, req_buf, 1024);
 		char *query = req_buf + 1;
-		int query_cnt = atoi(strtok(query, "\r\n"));
+		char *saveptr;  // Save pointer for the outer tokenization
+		int query_cnt = atoi(strtok_r(query, "\r\n", &saveptr));
 		char *tokens[10];
 		for (int i = 0; i < query_cnt; ++i)
 		{
-			char *chr_cnt = strtok(0, "\r\n");
-			char *token = strtok(0, "\r\n");
+			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
+			char *token = strtok_r(NULL, "\r\n", &saveptr);
 			tokens[i] = token;
-			printf("tokens[%d]: %s\n", i, tokens[i]);
+			printf("%d tokens[%d]: %s\n", port, i, tokens[i]);
 		}
 
 		char *command = tokens[0];
@@ -407,7 +455,7 @@ void *handle_client(void *arg)
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 
-	close(client_sock);
+	// close(client_sock);
 	return NULL;
 }
 
@@ -421,7 +469,7 @@ int main(int argc, char *argv[]) {
 		config[i] = 0;
 	}
 
-	int port = 6379;
+	port = 6379;
 	replication_port = 0;
 
 	for (int i = 1; i < argc; i+=2)
@@ -451,8 +499,8 @@ int main(int argc, char *argv[]) {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	printf("Logs from your program will appear here!\n");
 
-	// Uncomment this block to pass the first stage
-	//
+	map = hashmap_create();
+
 	int server_fd;
 	struct sockaddr_in client_addr;
 	socklen_t client_addr_len;
@@ -483,7 +531,12 @@ int main(int argc, char *argv[]) {
 	
 	if (replication_port)
 	{
-		handshake(replication_port);
+		pthread_t handshake_thread_id;
+		if (pthread_create(&handshake_thread_id, NULL, handshake, 0) != 0)
+		{
+			perror("Thread creation failed");
+		}
+		pthread_detach(handshake_thread_id);
 	}	
 	int connection_backlog = 5;
 	if (listen(server_fd, connection_backlog) != 0) {
@@ -493,8 +546,7 @@ int main(int argc, char *argv[]) {
 	
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
-
-	map = hashmap_create();
+	
 
 
 	char redis_file_path[1024];

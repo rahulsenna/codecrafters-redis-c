@@ -317,7 +317,12 @@ void *handshake()
 						expiry_time = curr_time + atoll(tokens[4]);
 					}
 					hashmap_put(map, tokens[1], tokens[2], expiry_time);
+				} else if (strncmp(command, "REPLCONF", strlen("REPLCONF")) == 0)
+				{
+					write(sock, "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n",
+						  strlen("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"));
 				}
+				
 				chr_cnt = strtok_r(0, "\r\n", &saveptr);
 				distance = chr_cnt - buf;
 			} while (chr_cnt && distance < bytes_read);

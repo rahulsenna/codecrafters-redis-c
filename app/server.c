@@ -364,6 +364,9 @@ void *handshake()
 				}
 
 				char *command = tokens[0];
+				if (command == 0)
+					break;
+
 				if (strncmp(command, "SET", strlen("SET")) == 0)
 				{
 					uint64_t expiry_time = UINT64_MAX;

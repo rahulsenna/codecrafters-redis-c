@@ -25,6 +25,24 @@ uint64_t get_curr_time(void)
 
 #define TABLE_SIZE 100
 
+void print_resp(char *buf, size_t len)
+{
+	printf("-----------[  ");
+	for (size_t i = 0; i < len; ++i)
+	{
+		 if (buf[i] == '\r')
+		 	printf("\\r");
+		 else if (buf[i] == '\n')
+		 	printf("\\n");
+		else if(buf[i] == 0)
+			printf("*NULL-TERM*");
+		else
+			printf("%c", buf[i]);
+	}
+	printf("   ]-----------\n");
+
+}
+
 typedef struct Entry {
     char* key;
     char* value;
@@ -257,11 +275,11 @@ void *handshake()
 		perror("Connect Failed\n");
 		return 0;
 	}
-	
+	size_t bytes_read;
 	write(sock, "*1\r\n$4\r\nPING\r\n", strlen("*1\r\n$4\r\nPING\r\n"));
 	char buf[1024];
-	read(sock, buf, sizeof(buf));
-	if (strncmp(buf, "+PONG", strlen("+PONG")) != 0)
+	bytes_read = read(sock, buf, sizeof(buf));
+	if (strncmp(buf, "+PONG\r\n", strlen("+PONG\r\n")) != 0)
 	{
 		perror("Pong Failed\n");
 		return 0;
@@ -271,33 +289,71 @@ void *handshake()
 		strlen("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n")
 	);
 
-	read(sock, buf, sizeof(buf));
+	bytes_read = read(sock, buf, sizeof(buf));
+	if (strncmp(buf, "+OK\r\n", strlen("+OK\r\n")) != 0)
+	{
+		perror("REPLCONF 1 Failed\n");
+		return 0;
+	}
+
 	write(sock,
 		"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n",
 		strlen("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
 	);
 
-	read(sock, buf, sizeof(buf));
+	bytes_read = read(sock, buf, sizeof(buf));
+	if (strncmp(buf, "+OK\r\n", strlen("+OK\r\n")) != 0)
+	{
+		perror("REPLCONF 2 Failed\n");
+		return 0;
+	}
+
 	write(sock,
 		  "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n",
 		  strlen("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"));
 
-	size_t bytes_read;
 	bytes_read = read(sock, buf, sizeof(buf));
-	if (bytes_read <= strlen("+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n"))
+	char *rdb_preamble = strstr(buf, "$");
+	
+	if (rdb_preamble == 0)
+	{
+		bytes_read = read(sock, buf, sizeof(buf));
+		rdb_preamble = buf;
+	}
+	size_t rdb_file_bytes;
+	sscanf(rdb_preamble, "$%lu", &rdb_file_bytes);
+	printf("rdb_file_bytes: %lu\n", rdb_file_bytes);
+
+	char *rdb_buffer = strstr(rdb_preamble, "\n") + 1;
+
+	size_t end_rdb_buffer = (rdb_buffer+rdb_file_bytes) - buf;
+	
+	printf("end_rdb_buffer: %lu\n", end_rdb_buffer);
+	printf("bytes_read: %lu\n", bytes_read);
+
+	if (end_rdb_buffer < bytes_read)
+	{
+		snprintf(buf, sizeof(buf), "%s", buf+end_rdb_buffer);
+		bytes_read -= end_rdb_buffer;
+	} else
 	{
 		bytes_read = read(sock, buf, sizeof(buf));
 	}
 	
+	char out[1024];
+	size_t total_bytes = 0;
 	while(1)
 	{
-		while ((bytes_read = read(sock, buf, sizeof(buf))))
+		do
 		{
+			total_bytes += bytes_read;
 			char *token, *saveptr;
 			char *chr_cnt = strtok_r(buf, "\r\n", &saveptr);
 			size_t distance;
 			do
 			{
+				size_t mypos = chr_cnt- buf;
+				size_t bytes_yet_to_read = bytes_read-mypos;
 				int query_cnt = atoi(chr_cnt + 1);
 				char *tokens[10];
 				for (int i = 0; i < query_cnt; ++i)
@@ -319,14 +375,25 @@ void *handshake()
 					hashmap_put(map, tokens[1], tokens[2], expiry_time);
 				} else if (strncmp(command, "REPLCONF", strlen("REPLCONF")) == 0)
 				{
-					write(sock, "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n",
-						  strlen("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"));
+					size_t total_processed_bytes = total_bytes-bytes_yet_to_read;
+					size_t n = total_processed_bytes;
+					int dig = 0;
+					do
+					{
+						n /=10;
+						dig++;
+					} while (n > 0);
+
+					snprintf(out, sizeof(out),
+							 "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%lu\r\n",
+							 dig,
+							 total_processed_bytes);
+					write(sock, out, strlen(out));
 				}
-				
 				chr_cnt = strtok_r(0, "\r\n", &saveptr);
 				distance = chr_cnt - buf;
 			} while (chr_cnt && distance < bytes_read);
-		}
+		} while ((bytes_read = read(sock, buf, sizeof(buf))));
 	}
 
 	close(sock);

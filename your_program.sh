@@ -14,7 +14,7 @@ set -e # Exit early if any commands fail
 # - Edit .codecrafters/compile.sh to change how your program compiles remotely
 (
   cd "$(dirname "$0")" # Ensure compile steps are run within the repository directory
-  gcc -o /tmp/codecrafters-build-redis-c app/*.c
+  gcc -g -o /tmp/codecrafters-build-redis-c app/server.c
 )
 
 # Copied from .codecrafters/run.sh
@@ -22,3 +22,11 @@ set -e # Exit early if any commands fail
 # - Edit this to change how your program runs locally
 # - Edit .codecrafters/run.sh to change how your program runs remotely
 exec /tmp/codecrafters-build-redis-c "$@"
+# exec osascript -e 'tell application "System Events" to key code 100'
+# lldb -o "source list" -o "run"   -- /tmp/codecrafters-build-redis-c "$@"
+# exec osascript -e 'tell application "Visual Studio Code" to activate' -e 'tell application "System Events" to key code 100'
+# echo "Done Running"
+
+
+	# import("time")
+	# time.Sleep(4*1000*1000)

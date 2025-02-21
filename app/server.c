@@ -526,6 +526,10 @@ void *handle_client(void *arg)
 			printf("replica_sock: %d\n", client_sock);
 			continue;
 		}
+		else if ((strncmp(tokens[0], "WAIT", strlen("WAIT")) == 0))
+		{
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", replica_socks_cnt);
+		}
 
 		write(client_sock, output_buf, strlen(output_buf));
 	}

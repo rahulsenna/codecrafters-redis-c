@@ -346,6 +346,8 @@ void *handshake()
 	{
 		do
 		{
+			if (bytes_read == 0)
+				break;
 			total_bytes += bytes_read;
 			char *token, *saveptr;
 			char *chr_cnt = strtok_r(buf, "\r\n", &saveptr);
@@ -364,8 +366,6 @@ void *handshake()
 				}
 
 				char *command = tokens[0];
-				if (command == 0)
-					break;
 
 				if (strncmp(command, "SET", strlen("SET")) == 0)
 				{

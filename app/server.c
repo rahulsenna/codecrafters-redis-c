@@ -9,7 +9,8 @@
 #include <ctype.h>
 #include <limits.h>
 #include <fcntl.h>
-#include<sys/time.h>
+#include <sys/time.h>
+#include <sys/poll.h>
 
 uint64_t get_curr_time(void) 
 {
@@ -408,6 +409,7 @@ void *handshake()
 char *keys[100];
 int replica_socks[10] = {0};
 int replica_socks_cnt = 0;
+int did_propogate_to_replica = 0;
 void *handle_client(void *arg)
 {
 	int client_sock = *(int *)arg;
@@ -419,7 +421,6 @@ void *handle_client(void *arg)
     char req_buf2[1024];
     char output_buf[1024];
     size_t bytes_read;
-	int this_is_replica = 0;
 	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 	{
 		memcpy(req_buf2, req_buf, 1024);
@@ -455,7 +456,8 @@ void *handle_client(void *arg)
 
 			hashmap_put(map, tokens[1], tokens[2], expiry_time);
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
-			
+
+			did_propogate_to_replica = replica_socks_cnt;
 			for (int i = 0; i < replica_socks_cnt; ++i)
 			{
 				write(replica_socks[i], req_buf2, strlen(req_buf2)); 
@@ -522,19 +524,83 @@ void *handle_client(void *arg)
 				  "$88\r\n\x52\x45\x44\x49\x53\x30\x30\x31\x31\xfa\x09\x72\x65\x64\x69\x73\x2d\x76\x65\x72\x05\x37\x2e\x32\x2e\x30\xfa\x0a\x72\x65\x64\x69\x73\x2d\x62\x69\x74\x73\xc0\x40\xfa\x05\x63\x74\x69\x6d\x65\xc2\x6d\x08\xbc\x65\xfa\x08\x75\x73\x65\x64\x2d\x6d\x65\x6d\xc2\xb0\xc4\x10\x00\xfa\x08\x61\x6f\x66\x2d\x62\x61\x73\x65\xc0\x00\xff\xf0\x6e\x3b\xfe\xc0\xff\x5a\xa2",
 				  88 + 5);
 			replica_socks[replica_socks_cnt++] = client_sock;
-			this_is_replica = 1;
 			printf("replica_sock: %d\n", client_sock);
-			continue;
+			return 0;
 		}
 		else if ((strncmp(tokens[0], "WAIT", strlen("WAIT")) == 0))
 		{
-			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", replica_socks_cnt);
+			if (did_propogate_to_replica == 0)
+			{ 
+				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", replica_socks_cnt);
+				write(client_sock, output_buf, strlen(output_buf));
+				continue;
+			}
+
+			int timeout_ms = atoi(tokens[2]);
+			int min_replica_processed_cnt = atoi(tokens[1]);
+
+			printf("replica_socks_cnt: %d\n", replica_socks_cnt);
+			printf("min_replica_processed_cnt: %d\n", min_replica_processed_cnt);
+
+			char buf[1024];
+			int out = 0;
+			const char *getack_cmd = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
+
+			// Send GETACK to all replicas
+			for (int i = 0; i < replica_socks_cnt; ++i)
+			{
+				// printf("Sending GETACK to replica %d (socket %d)\n", i, replica_socks[i]);
+				ssize_t sent = send(replica_socks[i], getack_cmd, strlen(getack_cmd), MSG_DONTWAIT);
+				if (sent < 0)
+				{
+					perror("Send failed");
+				}
+			}
+
+			struct pollfd fds[10];
+			for (int i = 0; i < replica_socks_cnt; ++i)
+			{
+				fds[i].fd = replica_socks[i];
+				fds[i].events = POLLIN; // We only care about incoming data
+			}
+
+			struct timeval start_time, current_time;
+			gettimeofday(&start_time, NULL);
+		
+			while (1)
+			{
+				gettimeofday(&current_time, NULL);
+				long elapsed_ms = (current_time.tv_sec - start_time.tv_sec) * 1000 +
+								  (current_time.tv_usec - start_time.tv_usec) / 1000;
+				long remaining_ms = timeout_ms - elapsed_ms;
+
+				if (remaining_ms <= 0)
+				{
+					printf("Total timeout reached, stopping polling.\n");
+					break;
+				}
+
+				int activity = poll(fds, replica_socks_cnt, remaining_ms);
+				if (activity > 0)
+				{
+					// Check which sockets have data
+					for (int i = 0; i < replica_socks_cnt; ++i)
+					{
+						if (fds[i].revents & POLLIN)
+						{
+							read(fds[i].fd, buf, sizeof(buf) - 1);
+							out++;
+						}
+					}
+				}
+			}
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", out);
 		}
 
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 
-	// close(client_sock);
+	close(client_sock);
 	return NULL;
 }
 

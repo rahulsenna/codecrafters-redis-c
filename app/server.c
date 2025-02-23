@@ -44,11 +44,19 @@ void print_resp(char *buf, size_t len)
 
 }
 
+typedef enum 
+{
+	TypeString = 0x0,
+	TypeStream,
+	TypeCount,
+} EntryType;
+
 typedef struct Entry {
     char* key;
     char* value;
 	uint64_t expiry;
     struct Entry* next;
+	EntryType type;
 } Entry;
 
 typedef struct HashMap {
@@ -77,7 +85,7 @@ HashMap* hashmap_create() {
 }
 
 // Insert or update key-value pair
-void hashmap_put(HashMap* map, const char* key, const char* value, uint64_t expiry) {
+void hashmap_put(HashMap* map, const char* key, const char* value, uint64_t expiry, EntryType type) {
     unsigned int index = hash(key);
     Entry* current = map->table[index];
     
@@ -100,6 +108,7 @@ void hashmap_put(HashMap* map, const char* key, const char* value, uint64_t expi
     newEntry->value = strdup(value);
 	newEntry->expiry = expiry;
     newEntry->next = map->table[index];
+	newEntry->type = type;
     map->table[index] = newEntry;
 }
 
@@ -244,11 +253,11 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 
 		if (timestamp && timestamp > get_curr_time())
 		{
-			hashmap_put(map, key, value, timestamp);
+			hashmap_put(map, key, value, timestamp, TypeString);
 		}
 		else if (timestamp == 0)
 		{
-			hashmap_put(map, key, value, UINT64_MAX);
+			hashmap_put(map, key, value, UINT64_MAX, TypeString);
 		}
 		keys[i] = key;
 			
@@ -258,6 +267,7 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 	fclose(rdbfile);
 	return db_map_size;
 }
+
 
 int db_map_size, replication_port, port;
 HashMap* map;
@@ -376,7 +386,7 @@ void *handshake()
 						uint64_t curr_time = get_curr_time();
 						expiry_time = curr_time + atoll(tokens[4]);
 					}
-					hashmap_put(map, tokens[1], tokens[2], expiry_time);
+					hashmap_put(map, tokens[1], tokens[2], expiry_time, TypeString);
 				} else if (strncmp(command, "REPLCONF", strlen("REPLCONF")) == 0)
 				{
 					size_t total_processed_bytes = total_bytes-bytes_yet_to_read;
@@ -454,7 +464,7 @@ void *handle_client(void *arg)
 				expiry_time = curr_time + atoll(tokens[4]);
 			}
 
-			hashmap_put(map, tokens[1], tokens[2], expiry_time);
+			hashmap_put(map, tokens[1], tokens[2], expiry_time, TypeString);
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 
 			did_propogate_to_replica = replica_socks_cnt;
@@ -597,14 +607,22 @@ void *handle_client(void *arg)
 		}
 		else if ((strncmp(tokens[0], "TYPE", strlen("TYPE")) == 0))
 		{
-			char *val = hashmap_get(map, tokens[1]);
+			Entry *val = hashmap_get_entry(map, tokens[1]);
 			if (val)
 			{
-				snprintf(output_buf, sizeof(output_buf), "+string\r\n");
+				if (val->type == TypeString)
+					snprintf(output_buf, sizeof(output_buf), "+string\r\n");
+				else if (val->type == TypeStream)
+					snprintf(output_buf, sizeof(output_buf), "+stream\r\n");
 			} else
 			{	
 				snprintf(output_buf, sizeof(output_buf), "+none\r\n");
 			}
+		}
+		else if ((strncmp(tokens[0], "XADD", strlen("XADD")) == 0))
+		{
+			hashmap_put(map, tokens[1], "", UINT64_MAX, TypeStream);
+			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(tokens[2]), tokens[2]);
 		}
 
 

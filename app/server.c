@@ -549,7 +549,6 @@ void *handle_client(void *arg)
 			// Send GETACK to all replicas
 			for (int i = 0; i < replica_socks_cnt; ++i)
 			{
-				// printf("Sending GETACK to replica %d (socket %d)\n", i, replica_socks[i]);
 				ssize_t sent = send(replica_socks[i], getack_cmd, strlen(getack_cmd), MSG_DONTWAIT);
 				if (sent < 0)
 				{
@@ -596,6 +595,18 @@ void *handle_client(void *arg)
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", out);
 		}
+		else if ((strncmp(tokens[0], "TYPE", strlen("TYPE")) == 0))
+		{
+			char *val = hashmap_get(map, tokens[1]);
+			if (val)
+			{
+				snprintf(output_buf, sizeof(output_buf), "+string\r\n");
+			} else
+			{	
+				snprintf(output_buf, sizeof(output_buf), "+none\r\n");
+			}
+		}
+
 
 		write(client_sock, output_buf, strlen(output_buf));
 	}

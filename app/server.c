@@ -630,6 +630,10 @@ void *handle_client(void *arg)
 			char *stream_val = tokens[4];
 
 			sscanf(ID, "%llu-%d", &ms_time, &sequence_num);
+			char sequence_char;
+			sscanf(ID, "%*llu-%c", &sequence_char);
+			if (sequence_char == '*')
+				sequence_num = -1;
 
 			if (ms_time == 0 && sequence_num == 0)
 			{
@@ -639,20 +643,42 @@ void *handle_client(void *arg)
 			}
 
 			char stream_str[256];
-			snprintf(stream_str, sizeof(stream_str), "%s %s:%s\n", ID, stream_key, stream_val);
 			Entry *val = hashmap_get_entry(map, entry_key);
 			if (val == 0)
 			{
-				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(ID), ID);	
+				if (sequence_num == -1)
+					sequence_num = (ms_time ? 0 : 1);
+				
+				snprintf(stream_str, sizeof(stream_str),
+								 "%llu-%d %s:%s\n", ms_time, sequence_num, stream_key, stream_val);
+				char new_id[256];
+				snprintf(new_id, sizeof(new_id),"%llu-%d", ms_time, sequence_num);
+				
+				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);	
 				hashmap_put(map, tokens[1], stream_str, UINT64_MAX, TypeStream);
 			} else
 			{
 				uint64_t last_ms_time;
 				int last_sequence_num;
 				sscanf(val->value, "%llu-%d", &last_ms_time, &last_sequence_num);
-				if (ms_time >= last_ms_time && sequence_num > last_sequence_num)
+
+				if (sequence_num == -1)
 				{
-					snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(ID), ID);
+					if (ms_time == last_ms_time)
+						sequence_num = last_sequence_num + 1;
+					else
+						sequence_num = 0;
+				}
+				
+				snprintf(stream_str, sizeof(stream_str),
+					"%llu-%d %s:%s\n", ms_time, sequence_num, stream_key, stream_val);
+
+				if (ms_time > last_ms_time || (ms_time == last_ms_time && sequence_num > last_sequence_num))
+				{
+					char new_id[256];
+					snprintf(new_id, sizeof(new_id),"%llu-%d", ms_time, sequence_num);
+
+					snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);
 					strncpy(val->value, stream_str, 256);
 				} else
 				{

@@ -443,8 +443,9 @@ void *handle_client(void *arg)
 			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
 			char *token = strtok_r(NULL, "\r\n", &saveptr);
 			tokens[i] = token;
-			printf("%d tokens[%d]: %s\n", port, i, tokens[i]);
+			printf("%d tokens[%d]: %s | ", port, i, tokens[i]);
 		}
+		printf("\n");
 
 		char *command = tokens[0];
 		if (strncmp(command, "PING", strlen("PING")) == 0)
@@ -621,8 +622,43 @@ void *handle_client(void *arg)
 		}
 		else if ((strncmp(tokens[0], "XADD", strlen("XADD")) == 0))
 		{
-			hashmap_put(map, tokens[1], "", UINT64_MAX, TypeStream);
-			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(tokens[2]), tokens[2]);
+			char *entry_key = tokens[1];
+			char* ID = tokens[2];
+			uint64_t ms_time;
+			int sequence_num;
+			char *stream_key = tokens[3];
+			char *stream_val = tokens[4];
+
+			sscanf(ID, "%llu-%d", &ms_time, &sequence_num);
+
+			if (ms_time == 0 && sequence_num == 0)
+			{
+				snprintf(output_buf, sizeof(output_buf), "-ERR The ID specified in XADD must be greater than 0-0\r\n");
+				write(client_sock, output_buf, strlen(output_buf));
+				continue;
+			}
+
+			char stream_str[256];
+			snprintf(stream_str, sizeof(stream_str), "%s %s:%s\n", ID, stream_key, stream_val);
+			Entry *val = hashmap_get_entry(map, entry_key);
+			if (val == 0)
+			{
+				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(ID), ID);	
+				hashmap_put(map, tokens[1], stream_str, UINT64_MAX, TypeStream);
+			} else
+			{
+				uint64_t last_ms_time;
+				int last_sequence_num;
+				sscanf(val->value, "%llu-%d", &last_ms_time, &last_sequence_num);
+				if (ms_time >= last_ms_time && sequence_num > last_sequence_num)
+				{
+					snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(ID), ID);
+					strncpy(val->value, stream_str, 256);
+				} else
+				{
+					snprintf(output_buf, sizeof(output_buf), "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n");
+				}
+			}
 		}
 
 

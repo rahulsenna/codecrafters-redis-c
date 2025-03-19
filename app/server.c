@@ -629,11 +629,19 @@ void *handle_client(void *arg)
 			char *stream_key = tokens[3];
 			char *stream_val = tokens[4];
 
-			sscanf(ID, "%llu-%d", &ms_time, &sequence_num);
-			char sequence_char;
-			sscanf(ID, "%*llu-%c", &sequence_char);
-			if (sequence_char == '*')
-				sequence_num = -1;
+			if (strncmp(ID, "*", 2) == 0)
+			{
+				sequence_num = 0;
+				ms_time = get_curr_time();
+			}
+			else
+			{
+				sscanf(ID, "%llu-%d", &ms_time, &sequence_num);
+				char sequence_char;
+				sscanf(ID, "%*llu-%c", &sequence_char);
+				if (sequence_char == '*')
+					sequence_num = -1;
+			}
 
 			if (ms_time == 0 && sequence_num == 0)
 			{

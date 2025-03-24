@@ -497,7 +497,7 @@ void *handle_client(void *arg)
 			else
 				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
 		}
-		else if (strncmp(tokens[0], "CONFIG", strlen("CONFIG")) == 0)
+		else if (strncmp(command, "CONFIG", strlen("CONFIG")) == 0)
 		{
 			if (strncmp(tokens[1], "GET", strlen("GET")) == 0)
 			{
@@ -509,7 +509,7 @@ void *handle_client(void *arg)
 				}
 			}
 		}
-		else if (strncmp(tokens[0], "KEYS", strlen("KEYS")) == 0)
+		else if (strncmp(command, "KEYS", strlen("KEYS")) == 0)
 		{
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
 			for (int i = 0; i < db_map_size; ++i)
@@ -517,7 +517,7 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "%s$%lu\r\n%s\r\n", output_buf, strlen(keys[i]), keys[i]);
 			}
 		}
-		else if ((strncmp(tokens[0], "INFO", strlen("INFO")) == 0))
+		else if ((strncmp(command, "INFO", strlen("INFO")) == 0))
 		{
 			if (replication_port == 0)
 			{
@@ -535,11 +535,11 @@ void *handle_client(void *arg)
 			else
 				snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
 		}
-		else if ((strncmp(tokens[0], "REPLCONF", strlen("REPLCONF")) == 0))
+		else if ((strncmp(command, "REPLCONF", strlen("REPLCONF")) == 0))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 		}
-		else if ((strncmp(tokens[0], "PSYNC", strlen("PSYNC")) == 0))
+		else if ((strncmp(command, "PSYNC", strlen("PSYNC")) == 0))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n");
 			write(client_sock, output_buf, strlen(output_buf));
@@ -550,7 +550,7 @@ void *handle_client(void *arg)
 			printf("replica_sock: %d\n", client_sock);
 			return 0;
 		}
-		else if ((strncmp(tokens[0], "WAIT", strlen("WAIT")) == 0))
+		else if ((strncmp(command, "WAIT", strlen("WAIT")) == 0))
 		{
 			if (did_propogate_to_replica == 0)
 			{ 
@@ -618,7 +618,7 @@ void *handle_client(void *arg)
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", out);
 		}
-		else if ((strncmp(tokens[0], "TYPE", strlen("TYPE")) == 0))
+		else if ((strncmp(command, "TYPE", strlen("TYPE")) == 0))
 		{
 			Entry *val = hashmap_get_entry(map, tokens[1]);
 			if (val)
@@ -632,7 +632,7 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "+none\r\n");
 			}
 		}
-		else if ((strncmp(tokens[0], "XADD", strlen("XADD")) == 0))
+		else if ((strncmp(command, "XADD", strlen("XADD")) == 0))
 		{
 			char *entry_key = tokens[1];
 			char* ID = tokens[2];

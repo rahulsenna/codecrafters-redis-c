@@ -29,4 +29,4 @@ exec /tmp/codecrafters-build-redis-c "$@"
 
 
 	# import("time")
-	# time.Sleep(4*1000*1000)
+	# time.Sleep(5 * time.Second)

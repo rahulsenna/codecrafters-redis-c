@@ -765,6 +765,28 @@ void *handle_client(void *arg)
 
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", matching_entries, output_buf);
 		}
+		else if ((strncmp(command, "XREAD", strlen("XREAD")) == 0))
+		{
+			char *stream_key = tokens[2];
+			Entry *entry = hashmap_get_entry(map, stream_key);
+			uint64_t entry_time;
+			int entry_seq;
+			
+			sscanf(tokens[3], "%llu-%d", &entry_time, &entry_seq);
+
+			snprintf(output_buf, sizeof(output_buf), "*1\r\n*2\r\n$%lu\r\n%s\r\n", strlen(stream_key), stream_key);
+
+			StreamEntry *stream_entry = entry->stream;
+			while (stream_entry)
+			{
+				if (stream_entry->ms_time > entry_time ||
+					(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
+				{
+					snprintf(output_buf, sizeof(output_buf), "%s*1\r\n%s", output_buf, stream_entry->str);
+				}
+				stream_entry = stream_entry->next;
+			}
+		}
 
 
 		write(client_sock, output_buf, strlen(output_buf));

@@ -51,12 +51,21 @@ typedef enum
 	TypeCount,
 } EntryType;
 
+typedef struct StreamEntry
+{
+	uint64_t ms_time;
+	int sequence_num;
+	char *str;
+    struct StreamEntry* next;
+} StreamEntry;
+
 typedef struct Entry {
     char* key;
     char* value;
 	uint64_t expiry;
     struct Entry* next;
 	EntryType type;
+	StreamEntry* stream;  // For TypeStream entries
 } Entry;
 
 typedef struct HashMap {
@@ -448,6 +457,9 @@ void *handle_client(void *arg)
 		printf("\n");
 
 		char *command = tokens[0];
+		for (char *c = command; *c; ++c)
+			*c = toupper(*c);
+
 		if (strncmp(command, "PING", strlen("PING")) == 0)
 		{
 			snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
@@ -652,6 +664,7 @@ void *handle_client(void *arg)
 
 			char stream_str[256];
 			Entry *val = hashmap_get_entry(map, entry_key);
+			char stream_resp[1024];
 			if (val == 0)
 			{
 				if (sequence_num == -1)
@@ -664,6 +677,18 @@ void *handle_client(void *arg)
 				
 				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);	
 				hashmap_put(map, entry_key, stream_str, UINT64_MAX, TypeStream);
+				
+				snprintf(stream_resp, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
+				for (int i = 3; i < query_cnt; ++i)
+					snprintf(stream_resp, sizeof(stream_resp), "%s$%lu\r\n%s\r\n", stream_resp, strlen(tokens[i]), tokens[i]);
+
+				val = hashmap_get_entry(map, entry_key);
+				val->stream = calloc(1, sizeof(StreamEntry));
+				val->stream->ms_time = ms_time;
+				val->stream->sequence_num = sequence_num;
+				val->stream->str = strdup(stream_resp);
+				val->stream->next = 0;
+
 			} else
 			{
 				uint64_t last_ms_time;
@@ -690,11 +715,55 @@ void *handle_client(void *arg)
 					if (val->value)
 						free(val->value);
 					val->value = strdup(stream_str);
+
+					StreamEntry *stream_entry = val->stream;
+					while(stream_entry->next)
+					{
+						stream_entry = stream_entry->next;
+					}
+
+					snprintf(stream_resp, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
+					for (int i = 3; i < query_cnt; ++i)
+						snprintf(stream_resp, sizeof(stream_resp), "%s$%lu\r\n%s\r\n", stream_resp, strlen(tokens[i]), tokens[i]);
+
+					stream_entry->next = calloc(1, sizeof(StreamEntry));
+					stream_entry = stream_entry->next;
+					stream_entry->ms_time = ms_time;
+					stream_entry->sequence_num = sequence_num;
+					stream_entry->str = strdup(stream_resp);
+					stream_entry->next = 0;
 				} else
 				{
 					snprintf(output_buf, sizeof(output_buf), "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n");
 				}
 			}
+		}
+		else if ((strncmp(command, "XRANGE", strlen("XRANGE")) == 0))
+		{
+			
+			char *stream_key = tokens[1];
+			uint64_t start_time, end_time;
+			int start_seq, end_seq = INT_MAX;
+			sscanf(tokens[2], "%llu-%d", &start_time, &start_seq);
+			sscanf(tokens[3], "%llu-%d", &end_time, &end_seq);
+			
+			output_buf[0] = '\0';
+
+			Entry *entry = hashmap_get_entry(map, stream_key);
+			StreamEntry *stream_entry = entry->stream;
+			int matching_entries = 0;
+			while (stream_entry)
+			{
+				if ((stream_entry->ms_time >= start_time && stream_entry->sequence_num >= start_seq) &&
+					(stream_entry->ms_time <= end_time && stream_entry->sequence_num <= end_seq))
+				{
+					matching_entries++;
+					snprintf(output_buf, sizeof(output_buf), "%s%s", output_buf, stream_entry->str);
+				}
+				stream_entry = stream_entry->next;
+			}
+
+			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", matching_entries, output_buf);
 		}
 
 

@@ -663,7 +663,7 @@ void *handle_client(void *arg)
 				snprintf(new_id, sizeof(new_id),"%llu-%d", ms_time, sequence_num);
 				
 				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);	
-				hashmap_put(map, tokens[1], stream_str, UINT64_MAX, TypeStream);
+				hashmap_put(map, entry_key, stream_str, UINT64_MAX, TypeStream);
 			} else
 			{
 				uint64_t last_ms_time;
@@ -687,7 +687,9 @@ void *handle_client(void *arg)
 					snprintf(new_id, sizeof(new_id),"%llu-%d", ms_time, sequence_num);
 
 					snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);
-					strncpy(val->value, stream_str, 256);
+					if (val->value)
+						free(val->value);
+					val->value = strdup(stream_str);
 				} else
 				{
 					snprintf(output_buf, sizeof(output_buf), "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n");

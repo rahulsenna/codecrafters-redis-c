@@ -433,7 +433,7 @@ void *handle_client(void *arg)
 {
 	int client_sock = *(int *)arg;
     free(arg);
-    printf("Client connected - port: %d\n", port);
+    printf("Client connected - port: %d - client_sock: %d\n", port, client_sock);
 
 
     char req_buf[1024];
@@ -768,18 +768,31 @@ void *handle_client(void *arg)
 		else if ((strncmp(command, "XREAD", strlen("XREAD")) == 0))
 		{
 			int stream_count  = (query_cnt-2)/2;
-			snprintf(output_buf, sizeof(output_buf), "*%d\r\n", stream_count);
 			
 			char *stream_keys[100];
 			char *IDs[100];
 			int token_idx = 2;
+			int blocking = 0;
+			if ((strncmp(tokens[1], "block", strlen("block")) == 0))
+			{
+				blocking = 1;
+				stream_count -= 1;
+				token_idx = 4;
+
+				useconds_t block_ms;
+				sscanf(tokens[2], "%u", &block_ms);
+				block_ms *= 1000;
+				usleep(block_ms);
+			}
+			snprintf(output_buf, sizeof(output_buf), "*%d\r\n", stream_count);
+
 			for (int i = 0; i < stream_count; ++i)
 				stream_keys[i] = tokens[token_idx++];
 			
 			for (int i = 0; i < stream_count; ++i)
 				IDs[i] = tokens[token_idx++];
 			
-			
+			int things_added = 0;
 			for (int i = 0; i < stream_count; ++i)
 			{
 				char *stream_key = stream_keys[i];
@@ -798,11 +811,16 @@ void *handle_client(void *arg)
 					if (stream_entry->ms_time > entry_time ||
 						(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
 					{
+						things_added++;
 						snprintf(output_buf, sizeof(output_buf), "%s*1\r\n%s", output_buf, stream_entry->str);
 					}
 					stream_entry = stream_entry->next;
 				}
 			}
+			
+			if (blocking && things_added == 0)
+				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");			
+			
 		}
 
 

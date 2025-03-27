@@ -767,62 +767,65 @@ void *handle_client(void *arg)
 		}
 		else if ((strncmp(command, "XREAD", strlen("XREAD")) == 0))
 		{
-			int stream_count  = (query_cnt-2)/2;
-			
+			int stream_count = (query_cnt - 2) / 2;
+
 			char *stream_keys[100];
 			char *IDs[100];
 			int token_idx = 2;
 			int blocking = 0;
+			useconds_t block_ms;
 			if ((strncmp(tokens[1], "block", strlen("block")) == 0))
 			{
 				blocking = 1;
 				stream_count -= 1;
 				token_idx = 4;
 
-				useconds_t block_ms;
 				sscanf(tokens[2], "%u", &block_ms);
 				block_ms *= 1000;
 				usleep(block_ms);
 			}
-			snprintf(output_buf, sizeof(output_buf), "*%d\r\n", stream_count);
 
 			for (int i = 0; i < stream_count; ++i)
 				stream_keys[i] = tokens[token_idx++];
-			
+
 			for (int i = 0; i < stream_count; ++i)
 				IDs[i] = tokens[token_idx++];
-			
+
 			int things_added = 0;
-			for (int i = 0; i < stream_count; ++i)
+			do
 			{
-				char *stream_key = stream_keys[i];
-				Entry *entry = hashmap_get_entry(map, stream_key);
-				uint64_t entry_time;
-				int entry_seq;
-
-				snprintf(output_buf, sizeof(output_buf), "%s*2\r\n$%lu\r\n%s\r\n", output_buf, strlen(stream_key), stream_key);
-				
-				sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
-	
-	
-				StreamEntry *stream_entry = entry->stream;
-				while (stream_entry)
+				snprintf(output_buf, sizeof(output_buf), "*%d\r\n", stream_count);
+				for (int i = 0; i < stream_count; ++i)
 				{
-					if (stream_entry->ms_time > entry_time ||
-						(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
-					{
-						things_added++;
-						snprintf(output_buf, sizeof(output_buf), "%s*1\r\n%s", output_buf, stream_entry->str);
-					}
-					stream_entry = stream_entry->next;
-				}
-			}
-			
-			if (blocking && things_added == 0)
-				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");			
-			
-		}
+					char *stream_key = stream_keys[i];
+					Entry *entry = hashmap_get_entry(map, stream_key);
+					uint64_t entry_time;
+					int entry_seq;
 
+					snprintf(output_buf, sizeof(output_buf), "%s*2\r\n$%lu\r\n%s\r\n", output_buf, strlen(stream_key), stream_key);
+
+					sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
+
+					StreamEntry *stream_entry = entry->stream;
+					while (stream_entry)
+					{
+						if (stream_entry->ms_time > entry_time ||
+							(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
+						{
+							things_added++;
+							snprintf(output_buf, sizeof(output_buf), "%s*1\r\n%s", output_buf, stream_entry->str);
+							if (blocking && block_ms == 0)
+								goto end_xread_proc;
+						}
+						stream_entry = stream_entry->next;
+					}
+				}
+			} while (blocking && block_ms == 0);
+
+		end_xread_proc:
+			if (blocking && things_added == 0)
+				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+		}
 
 		write(client_sock, output_buf, strlen(output_buf));
 	}

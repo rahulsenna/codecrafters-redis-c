@@ -794,6 +794,7 @@ void *handle_client(void *arg)
 			int things_added = 0;
 			do
 			{
+				int only_new_entries = 0;
 				snprintf(output_buf, sizeof(output_buf), "*%d\r\n", stream_count);
 				for (int i = 0; i < stream_count; ++i)
 				{
@@ -805,6 +806,12 @@ void *handle_client(void *arg)
 					snprintf(output_buf, sizeof(output_buf), "%s*2\r\n$%lu\r\n%s\r\n", output_buf, strlen(stream_key), stream_key);
 
 					sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
+					if (entry_time == 0 && entry_seq == 0 && strcmp(IDs[i], "$") == 0)
+					{
+						only_new_entries = 1;
+						entry_seq = INT_MAX;
+						entry_time = UINT64_MAX;
+					}
 
 					StreamEntry *stream_entry = entry->stream;
 					while (stream_entry)
@@ -816,6 +823,12 @@ void *handle_client(void *arg)
 							snprintf(output_buf, sizeof(output_buf), "%s*1\r\n%s", output_buf, stream_entry->str);
 							if (blocking && block_ms == 0)
 								goto end_xread_proc;
+						}
+						if (only_new_entries && stream_entry->next == 0)
+						{
+							entry_seq = stream_entry->sequence_num;
+							entry_time = stream_entry->ms_time;
+							only_new_entries = 0;
 						}
 						stream_entry = stream_entry->next;
 					}

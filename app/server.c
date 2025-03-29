@@ -509,6 +509,10 @@ void *handle_client(void *arg)
 				snprintf(num_str, sizeof(num_str), "%d", num);
 				val->value = strdup(num_str);
 				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", num);
+			} else
+			{
+				hashmap_put(map, tokens[1], "1", UINT64_MAX, TypeString);
+				snprintf(output_buf, sizeof(output_buf), ":1\r\n");
 			}
 		}
 

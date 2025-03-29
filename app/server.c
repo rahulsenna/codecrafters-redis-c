@@ -497,6 +497,21 @@ void *handle_client(void *arg)
 			else
 				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
 		}
+		else if (strncmp(command, "INCR", strlen("INCR")) == 0)
+		{
+			Entry *val = hashmap_get_entry(map, tokens[1]);
+
+			if (val)
+			{
+				int num = atoi(val->value) + 1;
+				free(val->value);
+				char num_str[10];
+				snprintf(num_str, sizeof(num_str), "%d", num);
+				val->value = strdup(num_str);
+				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", num);
+			}
+		}
+
 		else if (strncmp(command, "CONFIG", strlen("CONFIG")) == 0)
 		{
 			if (strncmp(tokens[1], "GET", strlen("GET")) == 0)

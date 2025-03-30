@@ -503,12 +503,20 @@ void *handle_client(void *arg)
 
 			if (val)
 			{
-				int num = atoi(val->value) + 1;
-				free(val->value);
-				char num_str[10];
-				snprintf(num_str, sizeof(num_str), "%d", num);
-				val->value = strdup(num_str);
-				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", num);
+				int num = INT_MIN;
+				sscanf(val->value, "%d", &num);
+				if (num == INT_MIN)
+				{
+					snprintf(output_buf, sizeof(output_buf), "-ERR value is not an integer or out of range\r\n");
+				} else
+				{
+					num++;
+					free(val->value);
+					char num_str[10];
+					snprintf(num_str, sizeof(num_str), "%d", num);
+					val->value = strdup(num_str);
+					snprintf(output_buf, sizeof(output_buf), ":%d\r\n", num);	
+				}
 			} else
 			{
 				hashmap_put(map, tokens[1], "1", UINT64_MAX, TypeString);

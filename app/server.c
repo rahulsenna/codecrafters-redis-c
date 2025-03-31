@@ -873,6 +873,15 @@ void *handle_client(void *arg)
 			is_multi = 1;
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 		}
+
+		else if (strncmp(command, "EXEC", strlen("EXEC")) == 0)
+		{
+			if (is_multi == 0)
+			{
+				snprintf(output_buf, sizeof(output_buf), "-ERR EXEC without MULTI\r\n");
+			}
+			is_multi = 0;
+		}
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

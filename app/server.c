@@ -440,6 +440,7 @@ void *handle_client(void *arg)
     char req_buf2[1024];
     char output_buf[1024];
     size_t bytes_read;
+	int is_multi = 0;
 	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 	{
 		memcpy(req_buf2, req_buf, 1024);
@@ -867,6 +868,11 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
 		}
 
+		else if (strncmp(command, "MULTI", strlen("MULTI")) == 0)
+		{
+			is_multi = 1;
+			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+		}
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

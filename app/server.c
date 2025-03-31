@@ -441,6 +441,8 @@ void *handle_client(void *arg)
     char output_buf[1024];
     size_t bytes_read;
 	int is_multi = 0;
+	char *trans_queue[100];
+	char trans_queue_cnt = 0;
 	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 	{
 		memcpy(req_buf2, req_buf, 1024);
@@ -879,9 +881,17 @@ void *handle_client(void *arg)
 			if (is_multi == 0)
 			{
 				snprintf(output_buf, sizeof(output_buf), "-ERR EXEC without MULTI\r\n");
+				goto END_READ_LOOP;
 			}
 			is_multi = 0;
+			if (trans_queue_cnt == 0)
+			{
+				snprintf(output_buf, sizeof(output_buf), "*0\r\n");
+				goto END_READ_LOOP;
+			}
+			
 		}
+END_READ_LOOP:
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

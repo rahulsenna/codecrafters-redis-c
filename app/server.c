@@ -479,6 +479,12 @@ void *handle_client(void *arg)
 				uint64_t curr_time = get_curr_time();
 				expiry_time = curr_time + atoll(tokens[4]);
 			}
+			if (is_multi)
+			{
+				trans_queue[trans_queue_cnt++] = strdup(req_buf2);
+				snprintf(output_buf, sizeof(output_buf), "+QUEUED\r\n");
+				goto END_READ_LOOP;
+			}
 
 			hashmap_put(map, tokens[1], tokens[2], expiry_time, TypeString);
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
@@ -503,6 +509,13 @@ void *handle_client(void *arg)
 		else if (strncmp(command, "INCR", strlen("INCR")) == 0)
 		{
 			Entry *val = hashmap_get_entry(map, tokens[1]);
+
+			if (is_multi)
+			{
+				trans_queue[trans_queue_cnt++] = strdup(req_buf2);
+				snprintf(output_buf, sizeof(output_buf), "+QUEUED\r\n");
+				goto END_READ_LOOP;
+			}
 
 			if (val)
 			{
@@ -889,7 +902,7 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "*0\r\n");
 				goto END_READ_LOOP;
 			}
-			
+
 		}
 END_READ_LOOP:
 		write(client_sock, output_buf, strlen(output_buf));

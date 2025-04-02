@@ -429,6 +429,145 @@ char *keys[100];
 int replica_socks[10] = {0};
 int replica_socks_cnt = 0;
 int did_propogate_to_replica = 0;
+
+#define BUF_SIZE 1024
+
+void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[10],
+						int is_multi, char *trans_queue[100], int *trans_queue_cnt)
+{
+	if (is_multi)
+	{
+		trans_queue[(*trans_queue_cnt)++] = strdup(req_buf2);
+		snprintf(output_buf, BUF_SIZE, "+QUEUED\r\n");
+		return;
+	}
+
+	Entry *val = hashmap_get_entry(map, tokens[1]);
+
+	if (val && val->expiry > get_curr_time())
+	{
+		snprintf(output_buf, BUF_SIZE, "+%s\r\n", val->value);
+	}
+	else
+		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
+}
+
+void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[10],
+						int is_multi, char *trans_queue[100], int *trans_queue_cnt)
+{
+	uint64_t expiry_time = UINT64_MAX;
+	
+
+	if (tokens[3] && strncmp(tokens[3], "px", strlen("px")) == 0)
+	{
+		uint64_t curr_time = get_curr_time();
+		expiry_time = curr_time + atoll(tokens[4]);
+	}
+	if (is_multi)
+	{
+		trans_queue[(*trans_queue_cnt)++] = strdup(req_buf2);
+		snprintf(output_buf, BUF_SIZE, "+QUEUED\r\n");
+		return;
+	}
+
+	hashmap_put(map, tokens[1], tokens[2], expiry_time, TypeString);
+	snprintf(output_buf, BUF_SIZE, "+OK\r\n");
+
+	did_propogate_to_replica = replica_socks_cnt;
+	for (int i = 0; i < replica_socks_cnt; ++i)
+	{
+		write(replica_socks[i], req_buf2, strlen(req_buf2)); 
+	}
+}
+
+void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[10],
+						 int is_multi, char *trans_queue[100], int *trans_queue_cnt)
+{
+	
+	Entry *val = hashmap_get_entry(map, tokens[1]);
+
+	if (is_multi)
+	{
+		trans_queue[(*trans_queue_cnt)++] = strdup(req_buf2);
+		snprintf(output_buf, BUF_SIZE, "+QUEUED\r\n");
+		return;
+	}
+
+	if (val)
+	{
+		int num = INT_MIN;
+		sscanf(val->value, "%d", &num);
+		if (num == INT_MIN)
+		{
+			snprintf(output_buf, BUF_SIZE, "-ERR value is not an integer or out of range\r\n");
+		} else
+		{
+			num++;
+			free(val->value);
+			char num_str[10];
+			snprintf(num_str, sizeof(num_str), "%d", num);
+			val->value = strdup(num_str);
+			snprintf(output_buf, BUF_SIZE, ":%d\r\n", num);	
+		}
+	} else
+	{
+		hashmap_put(map, tokens[1], "1", UINT64_MAX, TypeString);
+		snprintf(output_buf, BUF_SIZE, ":1\r\n");
+	}
+}
+
+void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_queue[100], int trans_queue_cnt)
+{
+	if (is_multi == 0)
+	{
+		snprintf(output_buf, BUF_SIZE, "-ERR EXEC without MULTI\r\n");
+		return;
+	}
+	if (trans_queue_cnt == 0)
+	{
+		snprintf(output_buf, BUF_SIZE, "*0\r\n");
+		return;
+	}
+
+	is_multi = 0;
+	char exec_output_buf[BUF_SIZE];
+	snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", trans_queue_cnt);
+	for (int trans_idx = 0; trans_idx < trans_queue_cnt; ++trans_idx)
+	{
+		char req_buf2[BUF_SIZE];
+		memcpy(req_buf2, trans_queue[trans_idx], BUF_SIZE);
+
+		char *query = trans_queue[trans_idx] + 1;
+		char *saveptr;  // Save pointer for the outer tokenization
+		int query_cnt = atoi(strtok_r(query, "\r\n", &saveptr));
+		char *tokens[10];
+
+		for (int i = 0; i < query_cnt; ++i)
+		{
+			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
+			char *token = strtok_r(NULL, "\r\n", &saveptr);
+			tokens[i] = token;
+		}
+		char *command = tokens[0];
+		for (char *c = command; *c; ++c)
+			*c = toupper(*c);
+
+		if (strncmp(command, "SET", strlen("SET")) == 0)
+			handle_set_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
+		else if (strncmp(command, "INCR", strlen("INCR")) == 0)
+			handle_incr_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
+		else if (strncmp(command, "GET", strlen("GET")) == 0)
+			handle_get_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
+		
+		snprintf(exec_output_buf, BUF_SIZE, "%s%s", exec_output_buf, output_buf);
+		free(trans_queue[trans_idx]);
+	}
+	strcpy(output_buf, exec_output_buf);
+}
+
+
+
+
 void *handle_client(void *arg)
 {
 	int client_sock = *(int *)arg;
@@ -442,7 +581,7 @@ void *handle_client(void *arg)
     size_t bytes_read;
 	int is_multi = 0;
 	char *trans_queue[100];
-	char trans_queue_cnt = 0;
+	int trans_queue_cnt = 0;
 	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 	{
 		memcpy(req_buf2, req_buf, 1024);
@@ -473,71 +612,15 @@ void *handle_client(void *arg)
 		}
 		else if (strncmp(command, "SET", strlen("SET")) == 0)
 		{
-			uint64_t expiry_time = UINT64_MAX;
-			if (tokens[3] && strncmp(tokens[3], "px", strlen("px")) == 0)
-			{
-				uint64_t curr_time = get_curr_time();
-				expiry_time = curr_time + atoll(tokens[4]);
-			}
-			if (is_multi)
-			{
-				trans_queue[trans_queue_cnt++] = strdup(req_buf2);
-				snprintf(output_buf, sizeof(output_buf), "+QUEUED\r\n");
-				goto END_READ_LOOP;
-			}
-
-			hashmap_put(map, tokens[1], tokens[2], expiry_time, TypeString);
-			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
-
-			did_propogate_to_replica = replica_socks_cnt;
-			for (int i = 0; i < replica_socks_cnt; ++i)
-			{
-				write(replica_socks[i], req_buf2, strlen(req_buf2)); 
-			}
+			handle_set_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
 		}
 		else if (strncmp(command, "GET", strlen("GET")) == 0)
 		{
-			Entry *val = hashmap_get_entry(map, tokens[1]);
-
-			if (val && val->expiry > get_curr_time())
-			{
-				snprintf(output_buf, sizeof(output_buf), "+%s\r\n", val->value);
-			}
-			else
-				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+			handle_get_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
 		}
 		else if (strncmp(command, "INCR", strlen("INCR")) == 0)
 		{
-			Entry *val = hashmap_get_entry(map, tokens[1]);
-
-			if (is_multi)
-			{
-				trans_queue[trans_queue_cnt++] = strdup(req_buf2);
-				snprintf(output_buf, sizeof(output_buf), "+QUEUED\r\n");
-				goto END_READ_LOOP;
-			}
-
-			if (val)
-			{
-				int num = INT_MIN;
-				sscanf(val->value, "%d", &num);
-				if (num == INT_MIN)
-				{
-					snprintf(output_buf, sizeof(output_buf), "-ERR value is not an integer or out of range\r\n");
-				} else
-				{
-					num++;
-					free(val->value);
-					char num_str[10];
-					snprintf(num_str, sizeof(num_str), "%d", num);
-					val->value = strdup(num_str);
-					snprintf(output_buf, sizeof(output_buf), ":%d\r\n", num);	
-				}
-			} else
-			{
-				hashmap_put(map, tokens[1], "1", UINT64_MAX, TypeString);
-				snprintf(output_buf, sizeof(output_buf), ":1\r\n");
-			}
+			handle_incr_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
 		}
 
 		else if (strncmp(command, "CONFIG", strlen("CONFIG")) == 0)
@@ -891,20 +974,10 @@ void *handle_client(void *arg)
 
 		else if (strncmp(command, "EXEC", strlen("EXEC")) == 0)
 		{
-			if (is_multi == 0)
-			{
-				snprintf(output_buf, sizeof(output_buf), "-ERR EXEC without MULTI\r\n");
-				goto END_READ_LOOP;
-			}
+			handle_exec_command(output_buf, is_multi, trans_queue, trans_queue_cnt);
 			is_multi = 0;
-			if (trans_queue_cnt == 0)
-			{
-				snprintf(output_buf, sizeof(output_buf), "*0\r\n");
-				goto END_READ_LOOP;
-			}
-
+			trans_queue_cnt = 0;
 		}
-END_READ_LOOP:
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

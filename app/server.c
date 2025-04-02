@@ -978,6 +978,14 @@ void *handle_client(void *arg)
 			is_multi = 0;
 			trans_queue_cnt = 0;
 		}
+		else if (strncmp(command, "DISCARD", strlen("DISCARD")) == 0)
+		{
+			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+			if (is_multi == 0)
+				snprintf(output_buf, sizeof(output_buf), "-ERR DISCARD without MULTI\r\n");
+			is_multi = 0;
+			trans_queue_cnt = 0;
+		}
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

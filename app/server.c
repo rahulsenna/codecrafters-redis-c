@@ -565,7 +565,79 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 	strcpy(output_buf, exec_output_buf);
 }
 
+void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int stream_count)
+{
+	char *stream_keys[100];
+	char *IDs[100];
+	int token_idx = 2;
+	int blocking = 0;
+	useconds_t block_ms;
+	if ((strncmp(tokens[1], "block", strlen("block")) == 0))
+	{
+		blocking = 1;
+		stream_count -= 1;
+		token_idx = 4;
 
+		sscanf(tokens[2], "%u", &block_ms);
+		block_ms *= 1000;
+		usleep(block_ms);
+	}
+
+	for (int i = 0; i < stream_count; ++i)
+		stream_keys[i] = tokens[token_idx++];
+
+	for (int i = 0; i < stream_count; ++i)
+		IDs[i] = tokens[token_idx++];
+
+	int things_added = 0;
+	do
+	{
+		int only_new_entries = 0;
+		snprintf(output_buf, BUF_SIZE, "*%d\r\n", stream_count);
+		for (int i = 0; i < stream_count; ++i)
+		{
+			char *stream_key = stream_keys[i];
+			Entry *entry = hashmap_get_entry(map, stream_key);
+			uint64_t entry_time;
+			int entry_seq;
+
+			snprintf(output_buf, BUF_SIZE, "%s*2\r\n$%lu\r\n%s\r\n", output_buf, strlen(stream_key), stream_key);
+
+			sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
+			if (entry_time == 0 && entry_seq == 0 && strcmp(IDs[i], "$") == 0)
+			{
+				only_new_entries = 1;
+				entry_seq = INT_MAX;
+				entry_time = UINT64_MAX;
+			}
+
+			StreamEntry *stream_entry = entry->stream;
+			while (stream_entry)
+			{
+				if (stream_entry->ms_time > entry_time ||
+					(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
+				{
+					things_added++;
+					snprintf(output_buf, BUF_SIZE, "%s*1\r\n%s", output_buf, stream_entry->str);
+					if (blocking && block_ms == 0)
+						return;
+				}
+				if (only_new_entries && stream_entry->next == 0)
+				{
+					entry_seq = stream_entry->sequence_num;
+					entry_time = stream_entry->ms_time;
+					only_new_entries = 0;
+				}
+				stream_entry = stream_entry->next;
+				if (block_ms == 0)
+					usleep(1);
+			}
+		}
+	} while (blocking && block_ms == 0);
+
+	if (blocking && things_added == 0)
+		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
+}
 
 
 void *handle_client(void *arg)
@@ -894,76 +966,7 @@ void *handle_client(void *arg)
 		else if ((strncmp(command, "XREAD", strlen("XREAD")) == 0))
 		{
 			int stream_count = (query_cnt - 2) / 2;
-
-			char *stream_keys[100];
-			char *IDs[100];
-			int token_idx = 2;
-			int blocking = 0;
-			useconds_t block_ms;
-			if ((strncmp(tokens[1], "block", strlen("block")) == 0))
-			{
-				blocking = 1;
-				stream_count -= 1;
-				token_idx = 4;
-
-				sscanf(tokens[2], "%u", &block_ms);
-				block_ms *= 1000;
-				usleep(block_ms);
-			}
-
-			for (int i = 0; i < stream_count; ++i)
-				stream_keys[i] = tokens[token_idx++];
-
-			for (int i = 0; i < stream_count; ++i)
-				IDs[i] = tokens[token_idx++];
-
-			int things_added = 0;
-			do
-			{
-				int only_new_entries = 0;
-				snprintf(output_buf, sizeof(output_buf), "*%d\r\n", stream_count);
-				for (int i = 0; i < stream_count; ++i)
-				{
-					char *stream_key = stream_keys[i];
-					Entry *entry = hashmap_get_entry(map, stream_key);
-					uint64_t entry_time;
-					int entry_seq;
-
-					snprintf(output_buf, sizeof(output_buf), "%s*2\r\n$%lu\r\n%s\r\n", output_buf, strlen(stream_key), stream_key);
-
-					sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
-					if (entry_time == 0 && entry_seq == 0 && strcmp(IDs[i], "$") == 0)
-					{
-						only_new_entries = 1;
-						entry_seq = INT_MAX;
-						entry_time = UINT64_MAX;
-					}
-
-					StreamEntry *stream_entry = entry->stream;
-					while (stream_entry)
-					{
-						if (stream_entry->ms_time > entry_time ||
-							(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
-						{
-							things_added++;
-							snprintf(output_buf, sizeof(output_buf), "%s*1\r\n%s", output_buf, stream_entry->str);
-							if (blocking && block_ms == 0)
-								goto end_xread_proc;
-						}
-						if (only_new_entries && stream_entry->next == 0)
-						{
-							entry_seq = stream_entry->sequence_num;
-							entry_time = stream_entry->ms_time;
-							only_new_entries = 0;
-						}
-						stream_entry = stream_entry->next;
-					}
-				}
-			} while (blocking && block_ms == 0);
-
-		end_xread_proc:
-			if (blocking && things_added == 0)
-				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+			handle_xread_command(output_buf, tokens, stream_count);
 		}
 
 		else if (strncmp(command, "MULTI", strlen("MULTI")) == 0)

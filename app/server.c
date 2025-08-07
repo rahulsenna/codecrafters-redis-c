@@ -253,6 +253,7 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 		int key_len = (int)buffer[byte_idx++];
 		char *key = malloc(sizeof(char)*key_len);
 		strncpy(key, (char *)buffer + byte_idx, key_len);
+		key[key_len] = '\0';
 
 		//--------[ Value ]--------------------------------------------------------------
 		byte_idx += key_len;
@@ -709,10 +710,11 @@ void *handle_client(void *arg)
 		}
 		else if (strncmp(command, "KEYS", strlen("KEYS")) == 0)
 		{
-			snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
-			for (int i = 0; i < db_map_size; ++i)
+			int offset = snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
+			for (int i = 0; i < db_map_size && offset < sizeof(output_buf); ++i)
 			{
-				snprintf(output_buf, sizeof(output_buf), "%s$%lu\r\n%s\r\n", output_buf, strlen(keys[i]), keys[i]);
+				offset += snprintf(output_buf + offset, sizeof(output_buf) - offset,
+								   "$%lu\r\n%s\r\n", strlen(keys[i]), keys[i]);
 			}
 		}
 		else if ((strncmp(command, "INFO", strlen("INFO")) == 0))

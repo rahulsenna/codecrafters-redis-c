@@ -647,6 +647,21 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
 }
 
+Entry *create_list(char *listname)
+{
+	Entry *list = calloc(1, sizeof(Entry));
+	list->key = strdup(listname);
+	list->list = calloc(100, sizeof(char *));
+	list->list += 50; // pointer to the middle (So LPUSH is easy)
+	list->list_cnt = 0;
+	list->expiry = UINT64_MAX;
+	list->type = TypeList;
+	
+	unsigned int index = hash(listname);
+	map->table[index] = list;
+	return list;
+}
+
 
 void *handle_client(void *arg)
 {
@@ -1006,20 +1021,28 @@ void *handle_client(void *arg)
 			Entry *list = hashmap_get_entry(map, listname);
 			if (list == NULL)
 			{
-				list = calloc(1, sizeof(Entry));
-				list->key = strdup(listname);
-				list->list = calloc(100, sizeof(char *));
-				list->list_cnt = 0;
-				list->expiry = UINT64_MAX;
-				list->type = TypeList;
-				
-				unsigned int index = hash(listname);
-				map->table[index] = list;
+				list = create_list(listname);
 			}
 
 			for (int i = 2; i < query_cnt; ++i)
 				list->list[list->list_cnt++] = strdup(tokens[i]);	 
 
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
+		}
+		else if (strncmp(command, "LPUSH", strlen("RPUSH")) == 0)
+		{
+			char *listname = tokens[1];
+			Entry *list = hashmap_get_entry(map, listname);
+			if (list == NULL)
+			{
+				list = create_list(listname);
+			}
+			list->list -= (query_cnt - 2);
+			for (int i = query_cnt - 1, j = 0; i >= 2; --i)
+			{
+				list->list[j++] = strdup(tokens[i]);
+				list->list_cnt++;
+			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
 		}
 		else if (strncmp(command, "LRANGE", strlen("LRANGE")) == 0)

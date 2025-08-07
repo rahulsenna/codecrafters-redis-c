@@ -1054,6 +1054,32 @@ void *handle_client(void *arg)
 				llen = list->list_cnt;
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", llen);
 		}
+		else if (strncmp(command, "LPOP", strlen("LPOP")) == 0)
+		{
+			char *listname = tokens[1];
+			Entry *list = hashmap_get_entry(map, listname);
+
+			int count = 1;
+			if (query_cnt == 3)
+				count = atoi(tokens[2]);
+			if (list == NULL)
+			{
+				write(client_sock, "*0\r\n", strlen("*0\r\n"));
+				close(client_sock);
+				return NULL;
+			}
+
+			if (count == 1)
+				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(list->list[0]), list->list[0]);
+			else
+			{
+				int offset = snprintf(output_buf, sizeof(output_buf), "*%d\r\n", count);
+				for (int i = 0; i < count; ++i)
+					offset += snprintf(output_buf + offset, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(list->list[i]), list->list[i]);
+			}
+			list->list += count;
+			list->list_cnt -= count;
+		}
 		else if (strncmp(command, "LRANGE", strlen("LRANGE")) == 0)
 		{
 			char *listname = tokens[1];

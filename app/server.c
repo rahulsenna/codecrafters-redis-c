@@ -26,9 +26,10 @@ uint64_t get_curr_time(void)
 
 #define TABLE_SIZE 100
 
-void print_resp(char *buf, size_t len)
+void print_resp(char *title, char *buf)
 {
-	printf("-----------[  ");
+	size_t len = strlen(buf);
+	printf("%s-----------[  ", title);
 	for (size_t i = 0; i < len; ++i)
 	{
 		 if (buf[i] == '\r')
@@ -590,25 +591,27 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 	for (int i = 0; i < stream_count; ++i)
 		IDs[i] = tokens[token_idx++];
 
+	int only_new_entries = 0;
+	if (tokens[5] && strcmp(tokens[5], "$") == 0)
+		only_new_entries = 1;
+
 	int things_added = 0;
-	int buf_offet = 0;
+	uint64_t entry_time;
+	int entry_seq;
 	do
 	{
-		int only_new_entries = 0;
+		int buf_offet = 0;
 		buf_offet += snprintf(output_buf+buf_offet, BUF_SIZE, "*%d\r\n", stream_count);
 		for (int i = 0; i < stream_count; ++i)
 		{
 			char *stream_key = stream_keys[i];
 			Entry *entry = hashmap_get_entry(map, stream_key);
-			uint64_t entry_time;
-			int entry_seq;
 
 			buf_offet += snprintf(output_buf+buf_offet, BUF_SIZE, "*2\r\n$%lu\r\n%s\r\n", strlen(stream_key), stream_key);
 
 			sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
-			if (entry_time == 0 && entry_seq == 0 && strcmp(IDs[i], "$") == 0)
+			if (only_new_entries == 1)
 			{
-				only_new_entries = 1;
 				entry_seq = INT_MAX;
 				entry_time = UINT64_MAX;
 			}

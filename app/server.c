@@ -49,6 +49,7 @@ typedef enum
 {
 	TypeString = 0x0,
 	TypeStream,
+	TypeList,
 	TypeCount,
 } EntryType;
 
@@ -67,6 +68,8 @@ typedef struct Entry {
     struct Entry* next;
 	EntryType type;
 	StreamEntry* stream;  // For TypeStream entries
+	char **list;
+	int list_cnt;
 } Entry;
 
 typedef struct HashMap {
@@ -996,6 +999,28 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "-ERR DISCARD without MULTI\r\n");
 			is_multi = 0;
 			trans_queue_cnt = 0;
+		}
+		else if (strncmp(command, "RPUSH", strlen("RPUSH")) == 0)
+		{
+			char *listname = tokens[1];
+			Entry *list = hashmap_get_entry(map, listname);
+			if (list == NULL)
+			{
+				list = calloc(1, sizeof(Entry));
+				list->key = strdup(listname);
+				list->list = calloc(100, sizeof(char *));
+				list->list_cnt = 0;
+				list->expiry = UINT64_MAX;
+				list->type = TypeList;
+				
+				unsigned int index = hash(listname);
+				map->table[index] = list;
+			}
+
+			for (int i = 2; i < query_cnt; ++i)
+				list->list[list->list_cnt++] = strdup(tokens[i]);	 
+
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
 		}
 		write(client_sock, output_buf, strlen(output_buf));
 	}

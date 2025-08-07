@@ -591,10 +591,11 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 		IDs[i] = tokens[token_idx++];
 
 	int things_added = 0;
+	int buf_offet = 0;
 	do
 	{
 		int only_new_entries = 0;
-		snprintf(output_buf, BUF_SIZE, "*%d\r\n", stream_count);
+		buf_offet += snprintf(output_buf+buf_offet, BUF_SIZE, "*%d\r\n", stream_count);
 		for (int i = 0; i < stream_count; ++i)
 		{
 			char *stream_key = stream_keys[i];
@@ -602,7 +603,7 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 			uint64_t entry_time;
 			int entry_seq;
 
-			snprintf(output_buf, BUF_SIZE, "%s*2\r\n$%lu\r\n%s\r\n", output_buf, strlen(stream_key), stream_key);
+			buf_offet += snprintf(output_buf+buf_offet, BUF_SIZE, "*2\r\n$%lu\r\n%s\r\n", strlen(stream_key), stream_key);
 
 			sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
 			if (entry_time == 0 && entry_seq == 0 && strcmp(IDs[i], "$") == 0)
@@ -619,7 +620,7 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 					(stream_entry->ms_time == entry_time && stream_entry->sequence_num > entry_seq))
 				{
 					things_added++;
-					snprintf(output_buf, BUF_SIZE, "%s*1\r\n%s", output_buf, stream_entry->str);
+					buf_offet += snprintf(output_buf+buf_offet, BUF_SIZE, "*1\r\n%s", stream_entry->str);
 					if (blocking && block_ms == 0)
 						return;
 				}

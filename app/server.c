@@ -10,7 +10,7 @@
 #include <limits.h>
 #include <fcntl.h>
 #include <sys/time.h>
-#include <sys/poll.h>
+#include <poll.h>
 
 uint64_t get_curr_time(void) 
 {
@@ -878,9 +878,10 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);	
 				hashmap_put(map, entry_key, stream_str, UINT64_MAX, TypeStream);
 				
-				snprintf(stream_resp, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
+				int stream_resp_offset = 0;
+				stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
 				for (int i = 3; i < query_cnt; ++i)
-					snprintf(stream_resp, sizeof(stream_resp), "%s$%lu\r\n%s\r\n", stream_resp, strlen(tokens[i]), tokens[i]);
+					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", strlen(tokens[i]), tokens[i]);
 
 				val = hashmap_get_entry(map, entry_key);
 				val->stream = calloc(1, sizeof(StreamEntry));
@@ -922,9 +923,10 @@ void *handle_client(void *arg)
 						stream_entry = stream_entry->next;
 					}
 
-					snprintf(stream_resp, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
+					int stream_resp_offset = 0;
+					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
 					for (int i = 3; i < query_cnt; ++i)
-						snprintf(stream_resp, sizeof(stream_resp), "%s$%lu\r\n%s\r\n", stream_resp, strlen(tokens[i]), tokens[i]);
+						stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", strlen(tokens[i]), tokens[i]);
 
 					stream_entry->next = calloc(1, sizeof(StreamEntry));
 					stream_entry = stream_entry->next;
@@ -947,7 +949,8 @@ void *handle_client(void *arg)
 			sscanf(tokens[2], "%llu-%d", &start_time, &start_seq);
 			sscanf(tokens[3], "%llu-%d", &end_time, &end_seq);
 			
-			output_buf[0] = '\0';
+			char temp_buff[1024];
+			int offset = 0;
 
 			Entry *entry = hashmap_get_entry(map, stream_key);
 			StreamEntry *stream_entry = entry->stream;
@@ -958,12 +961,11 @@ void *handle_client(void *arg)
 					(stream_entry->ms_time <= end_time && stream_entry->sequence_num <= end_seq))
 				{
 					matching_entries++;
-					snprintf(output_buf, sizeof(output_buf), "%s%s", output_buf, stream_entry->str);
+					offset += snprintf(temp_buff+offset, sizeof(temp_buff), "%s", stream_entry->str);
 				}
 				stream_entry = stream_entry->next;
 			}
-
-			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", matching_entries, output_buf);
+			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", matching_entries, temp_buff);
 		}
 		else if ((strncmp(command, "XREAD", strlen("XREAD")) == 0))
 		{

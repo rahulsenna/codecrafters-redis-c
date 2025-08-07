@@ -533,7 +533,7 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 
 	is_multi = 0;
 	char exec_output_buf[BUF_SIZE];
-	snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", trans_queue_cnt);
+	int buf_offset = snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", trans_queue_cnt);
 	for (int trans_idx = 0; trans_idx < trans_queue_cnt; ++trans_idx)
 	{
 		char req_buf2[BUF_SIZE];
@@ -561,7 +561,7 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 		else if (strncmp(command, "GET", strlen("GET")) == 0)
 			handle_get_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
 		
-		snprintf(exec_output_buf, BUF_SIZE, "%s%s", exec_output_buf, output_buf);
+		buf_offset += snprintf(exec_output_buf+buf_offset, BUF_SIZE, "%s", output_buf);
 		free(trans_queue[trans_idx]);
 	}
 	strcpy(output_buf, exec_output_buf);

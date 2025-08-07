@@ -1022,6 +1022,45 @@ void *handle_client(void *arg)
 
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
 		}
+		else if (strncmp(command, "LRANGE", strlen("LRANGE")) == 0)
+		{
+			char *listname = tokens[1];
+			int beg = atoi(tokens[2]);
+			int end = atoi(tokens[3]);
+
+			Entry *list = hashmap_get_entry(map, listname);
+			if (list == NULL)
+			{
+				write(client_sock, "*0\r\n", strlen("*0\r\n"));
+				close(client_sock);
+				return NULL;
+			}
+
+			if (beg < 0)
+				beg = list->list_cnt+beg;
+			if (end < 0)
+				end = list->list_cnt+end;
+
+			if (beg < 0)
+				beg = 0;
+			if (end < 0)
+				end = 0;
+
+			char temp[1024];
+			temp[0] = 0;
+			int offset = 0;
+			int count = 0;
+			for (int i = beg; i <= end && i < list->list_cnt; ++i)
+			{
+				if (list->list[i])
+				{
+					count++;
+					offset += snprintf(temp + offset, sizeof(temp), "$%lu\r\n%s\r\n", strlen(list->list[i]), list->list[i]);
+				}
+			}
+			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", count, temp);
+		}
+		
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

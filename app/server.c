@@ -1029,7 +1029,7 @@ void *handle_client(void *arg)
 
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
 		}
-		else if (strncmp(command, "LPUSH", strlen("RPUSH")) == 0)
+		else if (strncmp(command, "LPUSH", strlen("LPUSH")) == 0)
 		{
 			char *listname = tokens[1];
 			Entry *list = hashmap_get_entry(map, listname);
@@ -1044,6 +1044,15 @@ void *handle_client(void *arg)
 				list->list_cnt++;
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
+		}
+		else if (strncmp(command, "LLEN", strlen("LLEN")) == 0)
+		{
+			char *listname = tokens[1];
+			Entry *list = hashmap_get_entry(map, listname);
+			int llen = 0;
+			if (list)
+				llen = list->list_cnt;
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", llen);
 		}
 		else if (strncmp(command, "LRANGE", strlen("LRANGE")) == 0)
 		{

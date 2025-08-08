@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <poll.h>
+#include <pthread.h>
 
 uint64_t get_curr_time(void) 
 {
@@ -429,7 +430,6 @@ void *handshake()
 	return 0;
 }
 
-#include <pthread.h>
 char *keys[100];
 int replica_socks[10] = {0};
 int replica_socks_cnt = 0;
@@ -661,7 +661,7 @@ Entry *create_list(char *listname)
 	map->table[index] = list;
 	return list;
 }
-
+pthread_mutex_t lpop_mutex;
 
 void *handle_client(void *arg)
 {
@@ -1080,6 +1080,39 @@ void *handle_client(void *arg)
 			list->list += count;
 			list->list_cnt -= count;
 		}
+		else if (strncmp(command, "BLPOP", strlen("BLPOP")) == 0)
+		{
+			pthread_mutex_lock(&lpop_mutex);
+			char *listname = tokens[1];
+			float timeout_sec = 0;
+			if (query_cnt == 3)
+				timeout_sec = atof(tokens[2]);
+			
+			Entry *list = hashmap_get_entry(map, listname);
+			if (list == NULL)
+				list = create_list(listname);
+
+			useconds_t timeout_mic_sec = (useconds_t)(timeout_sec*1000000);
+			if (timeout_mic_sec>0)
+			{
+				usleep(timeout_mic_sec);
+			}
+			else
+			{
+				while (list->list_cnt == 0)
+					usleep(100);
+			}
+			if (list->list_cnt > 0)
+			{
+				snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(listname), listname, strlen(list->list[0]), list->list[0]);
+				list->list += 1;
+				list->list_cnt -= 1;
+			} else
+			{
+				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+			}
+			pthread_mutex_unlock(&lpop_mutex);
+		}
 		else if (strncmp(command, "LRANGE", strlen("LRANGE")) == 0)
 		{
 			char *listname = tokens[1];
@@ -1130,6 +1163,7 @@ int main(int argc, char *argv[]) {
 	// Disable output buffering
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
+	pthread_mutex_init(&lpop_mutex, NULL);
 
 	for (int i = 0; i < ArgCount; ++i)
 	{

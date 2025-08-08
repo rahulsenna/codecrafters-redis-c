@@ -1162,10 +1162,33 @@ void *handle_client(void *arg)
 			if (subscribe == NULL)
 				subscribe = create_list(sub);
 
+			Entry *channel = hashmap_get_entry(map, tokens[1]);
+			if (channel == NULL)
+				channel = create_list(tokens[1]);
+			channel->list[channel->list_cnt++] = strdup(sub);
+
 			subscribe->list[subscribe->list_cnt++] = strdup(tokens[1]);
 			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("subscribe"), "subscribe", strlen(tokens[1]), tokens[1], subscribe->list_cnt);
 		}
-		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0)
+		else if (strncmp(command, "PUBLISH", strlen("PUBLISH")) == 0)
+		{
+			char *channel = tokens[1];
+			Entry *subscribe = hashmap_get_entry(map, channel);
+			int count = 0;
+			if (subscribe)
+				count = subscribe->list_cnt;
+
+			for (int i = 0; i < count; ++i)
+			{
+				int socket = atoi(subscribe->list[i]);
+				char temp[256];
+				snprintf(temp, sizeof(temp), "*3\r\n$7\r\nmessage\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(channel), channel, strlen(tokens[2]), tokens[2]);
+				write(socket, temp, strlen(temp));
+			}
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", count);
+		}
+
+		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 && strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 )
 		{	
 			if (strncmp(command, "PING", strlen("PING")) == 0)
 				snprintf(output_buf, sizeof(output_buf), "*2\r\n$4\r\npong\r\n$0\r\n\r\n");

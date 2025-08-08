@@ -665,6 +665,7 @@ pthread_mutex_t lpop_mutex;
 
 void *handle_client(void *arg)
 {
+	int subscribe_mode = 0;
 	int client_sock = *(int *)arg;
     free(arg);
     printf("Client connected - port: %d - client_sock: %d\n", port, client_sock);
@@ -1152,6 +1153,26 @@ void *handle_client(void *arg)
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", count, temp);
 		}
 		
+		else if (strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) == 0)
+		{
+			char sub[256];
+			sprintf(sub, "%d%s", client_sock, tokens[0]);
+			subscribe_mode = 1;
+			Entry *subscribe = hashmap_get_entry(map, sub);
+			if (subscribe == NULL)
+				subscribe = create_list(sub);
+
+			subscribe->list[subscribe->list_cnt++] = strdup(tokens[1]);
+			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("subscribe"), "subscribe", strlen(tokens[1]), tokens[1], subscribe->list_cnt);
+		}
+		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0)
+		{	
+			if (strncmp(command, "PING", strlen("PING")) == 0)
+				snprintf(output_buf, sizeof(output_buf), "*2\r\n$4\r\npong\r\n$0\r\n\r\n");
+			else
+				snprintf(output_buf, sizeof(output_buf), "-ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n", command);
+		}
+
 		write(client_sock, output_buf, strlen(output_buf));
 	}
 

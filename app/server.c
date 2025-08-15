@@ -1206,6 +1206,10 @@ void *handle_client(void *arg)
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", count);
 		}
+		else if (strncmp(command, "ZADD", strlen("ZADD")) == 0)
+		{
+			snprintf(output_buf, sizeof(output_buf), ":1\r\n");
+		}
 
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&
 			strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 && strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) != 0)

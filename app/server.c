@@ -51,6 +51,7 @@ typedef enum
 	TypeString = 0x0,
 	TypeStream,
 	TypeList,
+	TypeSortedSet,
 	TypeCount,
 } EntryType;
 
@@ -62,14 +63,25 @@ typedef struct StreamEntry
     struct StreamEntry* next;
 } StreamEntry;
 
+typedef struct SortedSetNode
+{
+	double key;
+	char *value;
+	struct SortedSetNode *left, *right;
+} SortedSetNode;
 typedef struct Entry {
     char* key;
-    char* value;
+	char *value;
 	uint64_t expiry;
     struct Entry* next;
 	EntryType type;
-	StreamEntry* stream;  // For TypeStream entries
-	char **list;
+	union
+	{
+		SortedSetNode *sorted_set;
+		StreamEntry *stream; // For TypeStream entries
+		char **list;
+	};
+
 	int list_cnt;
 } Entry;
 
@@ -661,6 +673,42 @@ Entry *create_list(char *listname)
 	map->table[index] = list;
 	return list;
 }
+
+int insert_into_sorted_set_rec(SortedSetNode **node, char *zset_member, double key)
+{
+	if ((*node) == 0)
+	{
+		*node = calloc(1, sizeof(SortedSetNode));
+		(*node)->key = key;
+		(*node)->value = strdup(zset_member);
+		return 1;
+	}
+	if (strcmp((*node)->value, zset_member) == 0)
+	{
+		(*node)->key = key;
+		return 0;
+	}
+
+	if ((*node)->key > key)
+		return insert_into_sorted_set_rec(&((*node)->left), zset_member, key);
+	else
+		return insert_into_sorted_set_rec(&((*node)->right), zset_member, key);
+}
+
+int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
+{
+	Entry *e = hashmap_get_entry(map, zset_key);
+	if (e == NULL)
+	{
+		hashmap_put(map, zset_key, "", UINT64_MAX, TypeSortedSet);
+		e = hashmap_get_entry(map, zset_key);
+		e->sorted_set = calloc(1, sizeof(SortedSetNode));
+		e->sorted_set->key = key;
+		e->sorted_set->value = strdup(zset_member);
+		return 1;
+	}
+	return insert_into_sorted_set_rec(&e->sorted_set, zset_member, key);
+}
 pthread_mutex_t lpop_mutex;
 
 void *handle_client(void *arg)
@@ -1208,7 +1256,12 @@ void *handle_client(void *arg)
 		}
 		else if (strncmp(command, "ZADD", strlen("ZADD")) == 0)
 		{
-			snprintf(output_buf, sizeof(output_buf), ":1\r\n");
+			// [your_program] 6379 tokens[0]: ZADD | 6379 tokens[1]: orange | 6379 tokens[2]: 79.28318206168746 | 6379 tokens[3]: grape | 
+			char *zset_key = tokens[1];
+			double value = atof(tokens[2]);
+			char *zset_member = tokens[3];
+			int res = insert_into_sorted_set(zset_key, zset_member, value);
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", res);
 		}
 
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&

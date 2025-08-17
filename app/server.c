@@ -67,8 +67,31 @@ typedef struct SortedSetNode
 {
 	double key;
 	char *value;
-	struct SortedSetNode *left, *right;
+	struct SortedSetNode** forward; // next nodes at each level
+    int level;
 } SortedSetNode;
+
+#define P 0.5
+#define MAX_LEVEL 6
+
+typedef struct SkipList
+{
+	SortedSetNode* header;
+    int level;
+} SkipList;
+typedef struct ZSetMember
+{
+	char *key;
+	SortedSetNode *value;
+	int rank;
+	struct ZSetMember* next;
+} ZSetMember;
+
+typedef struct SortedSet
+{
+	ZSetMember *map[TABLE_SIZE];
+	SkipList *list;
+} SortedSet;
 typedef struct Entry {
     char* key;
 	char *value;
@@ -77,7 +100,7 @@ typedef struct Entry {
 	EntryType type;
 	union
 	{
-		SortedSetNode *sorted_set;
+		SortedSet *sorted_set;
 		StreamEntry *stream; // For TypeStream entries
 		char **list;
 	};
@@ -674,25 +697,123 @@ Entry *create_list(char *listname)
 	return list;
 }
 
-int insert_into_sorted_set_rec(SortedSetNode **node, char *zset_member, double key)
+void zset_map_put(SortedSet *set, const char *key, SortedSetNode *value, int rank)
 {
-	if ((*node) == 0)
+	unsigned int index = hash(key);
+	ZSetMember *current = set->map[index];
+	while (current != NULL)
 	{
-		*node = calloc(1, sizeof(SortedSetNode));
-		(*node)->key = key;
-		(*node)->value = strdup(zset_member);
-		return 1;
-	}
-	if (strcmp((*node)->value, zset_member) == 0)
-	{
-		(*node)->key = key;
-		return 0;
+		if (strcmp(current->key, key) == 0)
+		{
+			current->value = value;
+			current->rank = rank;
+			return;
+		}
+		current = current->next;
 	}
 
-	if ((*node)->key > key)
-		return insert_into_sorted_set_rec(&((*node)->left), zset_member, key);
-	else
-		return insert_into_sorted_set_rec(&((*node)->right), zset_member, key);
+	ZSetMember *newEntry = (ZSetMember *)malloc(sizeof(ZSetMember));
+	if (newEntry == NULL)
+		return;
+	newEntry->key = strdup(key);
+	newEntry->value = value;
+	newEntry->rank = rank;
+	newEntry->next = set->map[index];
+	set->map[index] = newEntry;
+}
+ZSetMember* zset_get(SortedSet* set, const char* key)
+{
+    unsigned int index = hash(key);
+    ZSetMember* current = set->map[index];
+    
+    while (current != NULL)
+	{
+        if (strcmp(current->key, key) == 0)
+		{
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+SortedSetNode *skiplist_create_node(double key, char *value, int level)
+{
+	SortedSetNode *node = (SortedSetNode *)malloc(sizeof(SortedSetNode));
+	node->key = key;
+	node->value = strdup(value);
+	node->level = level;
+	node->forward = (SortedSetNode **)malloc(sizeof(SortedSetNode *) * (level + 1));
+
+	for (int i = 0; i <= level; i++)
+		node->forward[i] = NULL;
+	return node;
+}
+
+SkipList *create_skip_list()
+{
+	SkipList* list = (SkipList*)malloc(sizeof(SkipList));
+    
+    list->header = skiplist_create_node(-1, "", MAX_LEVEL);
+    list->level = 0;
+    return list;
+}
+int random_level()
+{
+	int level = 0;
+	while (((float)rand() / (float)RAND_MAX) < P && level < MAX_LEVEL)
+		level++;
+	return level;
+}
+void skiplist_insert(SkipList *list, double key, char *value)
+{
+	SortedSetNode *current = list->header;
+	SortedSetNode *update[MAX_LEVEL + 1];
+
+	for (int i = list->level; i >= 0; i--)
+	{
+		while (current->forward[i] != NULL &&
+			   (current->forward[i]->key < key ||
+				(current->forward[i]->key == key && strcmp(current->forward[i]->value, value) < 0)))
+		{
+			current = current->forward[i];
+		}
+		update[i] = current;
+	}
+	current = current->forward[0];
+	int newLevel = random_level();
+
+	if (newLevel > list->level)
+	{
+		for (int i = list->level + 1; i <= newLevel; i++)
+		{
+			update[i] = list->header;
+		}
+		list->level = newLevel;
+	}
+
+	SortedSetNode *newNode = skiplist_create_node(key, value, newLevel);
+
+
+	for (int i = 0; i <= newLevel; i++)
+	{
+		newNode->forward[i] = update[i]->forward[i];
+		update[i]->forward[i] = newNode;
+	}
+}
+
+void skiplist_traverse(SortedSet *set)
+{
+	SkipList *list = set->list;
+	SortedSetNode *current = list->header->forward[0];
+	int rank = 0;
+	while (current != NULL)
+	{
+		// printf("[%f:\"%s\"] ",  current->key, current->value);
+		zset_map_put(set, current->value, current, rank++);
+		current = current->forward[0];
+	}
+	printf("\n");
 }
 
 int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
@@ -702,12 +823,30 @@ int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
 	{
 		hashmap_put(map, zset_key, "", UINT64_MAX, TypeSortedSet);
 		e = hashmap_get_entry(map, zset_key);
-		e->sorted_set = calloc(1, sizeof(SortedSetNode));
-		e->sorted_set->key = key;
-		e->sorted_set->value = strdup(zset_member);
+		e->sorted_set = calloc(1, sizeof(SortedSet));
+		e->sorted_set->list = create_skip_list();
+		skiplist_insert(e->sorted_set->list, key, zset_member);
+
+		for (int i = 0; i < TABLE_SIZE; i++)
+		{
+			e->sorted_set->map[i] = NULL;
+		}
+		zset_map_put(e->sorted_set, zset_member, e->sorted_set->list->header->forward[0], 1);
 		return 1;
 	}
-	return insert_into_sorted_set_rec(&e->sorted_set, zset_member, key);
+	unsigned int index = hash(zset_member);
+    ZSetMember* member = e->sorted_set->map[index];
+	int res = 1;
+	if (member)
+	{
+		res = 0;
+		e->sorted_set->map[index] = NULL;
+		free(member->key);
+		free(member);
+	}
+	skiplist_insert(e->sorted_set->list, key, zset_member);
+	skiplist_traverse(e->sorted_set);
+	return res;
 }
 pthread_mutex_t lpop_mutex;
 
@@ -822,7 +961,7 @@ void *handle_client(void *arg)
 			return 0;
 		}
 		else if ((strncmp(command, "WAIT", strlen("WAIT")) == 0))
-		{
+		{ 
 			if (did_propogate_to_replica == 0)
 			{ 
 				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", replica_socks_cnt);
@@ -1256,12 +1395,26 @@ void *handle_client(void *arg)
 		}
 		else if (strncmp(command, "ZADD", strlen("ZADD")) == 0)
 		{
-			// [your_program] 6379 tokens[0]: ZADD | 6379 tokens[1]: orange | 6379 tokens[2]: 79.28318206168746 | 6379 tokens[3]: grape | 
 			char *zset_key = tokens[1];
 			double value = atof(tokens[2]);
 			char *zset_member = tokens[3];
 			int res = insert_into_sorted_set(zset_key, zset_member, value);
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", res);
+		}
+		else if (strncmp(command, "ZRANK", strlen("ZRANK")) == 0)
+		{
+			char *zset_key = tokens[1];
+			char *zset_member = tokens[2];
+			Entry *e = hashmap_get_entry(map, zset_key);
+			
+			snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+
+			if (e)
+			{
+				ZSetMember *member = zset_get(e->sorted_set, zset_member);
+				if (member)
+					snprintf(output_buf, sizeof(output_buf), ":%d\r\n", member->rank);
+			}
 		}
 
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&

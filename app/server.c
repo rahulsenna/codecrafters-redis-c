@@ -1523,6 +1523,23 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(t_buf), t_buf);
 			}
 		}
+		else if (strncmp(command, "ZREM", strlen("ZREM")) == 0)
+		{
+			char *zset_key = tokens[1];
+			char *zset_member = tokens[2];
+			snprintf(output_buf, sizeof(output_buf), ":0\r\n");
+			Entry *e = hashmap_get_entry(map, zset_key);
+			if (e)
+			{
+				ZSetMember *member = zset_get(e->sorted_set, zset_member);
+				if (member)
+				{
+					skiplist_remove(e->sorted_set->list, member->value->key, zset_member);
+					skiplist_traverse(e->sorted_set);
+					snprintf(output_buf, sizeof(output_buf), ":1\r\n");
+				}
+			}			
+		}
 
 		
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&

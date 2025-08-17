@@ -805,6 +805,47 @@ void skiplist_insert(SkipList *list, double key, char *value)
 	}
 }
 
+void skiplist_remove(SkipList *list, double key, char *value)
+{
+	SortedSetNode *current = list->header;
+	SortedSetNode *update[MAX_LEVEL + 1];
+
+	for (int i = list->level; i >= 0; i--)
+	{
+		while (current->forward[i] != NULL && current->forward[i]->key < key)
+		{
+			current = current->forward[i];
+		}
+		update[i] = current;
+	}
+	current = current->forward[0];
+
+	while (current != NULL && current->key == key)
+	{
+		if (strcmp(current->value, value) == 0)
+		{
+			for (int i = 0; i <= list->level; i++)
+			{
+				if (update[i]->forward[i] != current)
+					break;
+
+				update[i]->forward[i] = current->forward[i];
+			}
+
+			free(current->value);
+			free(current->forward);
+			free(current);
+
+			while (list->level > 0 && list->header->forward[list->level] == NULL)
+				list->level--;
+
+			printf("Deleted key=%f, value=\"%s\"\n", key, value);
+			return;
+		}
+		current = current->forward[0];
+	}
+}
+
 void skiplist_traverse(SortedSet *set)
 {
 	SkipList *list = set->list;
@@ -830,7 +871,7 @@ int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
 		e->sorted_set = calloc(1, sizeof(SortedSet));
 		e->sorted_set->list = create_skip_list();
 		skiplist_insert(e->sorted_set->list, key, zset_member);
-
+		e->sorted_set->size = 1;
 		for (int i = 0; i < TABLE_SIZE; i++)
 		{
 			e->sorted_set->map[i] = NULL;
@@ -844,6 +885,7 @@ int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
 	if (member)
 	{
 		res = 0;
+		skiplist_remove(e->sorted_set->list, member->value->key, member->value->value);
 		e->sorted_set->map[index] = NULL;
 		free(member->key);
 		free(member);
@@ -1458,6 +1500,18 @@ void *handle_client(void *arg)
 				}				
 			}
 		}
+		else if (strncmp(command, "ZCARD", strlen("ZCARD")) == 0)
+		{
+			char *zset_key = tokens[1];
+			Entry *e = hashmap_get_entry(map, zset_key);
+			snprintf(output_buf, sizeof(output_buf), ":0\r\n");
+			if (e)
+			{ 
+				int total = e->sorted_set->size;
+				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", total);
+			}
+		}
+		
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&
 			strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 && strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) != 0)
 		{	

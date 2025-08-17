@@ -46,6 +46,8 @@ void print_resp(char *title, char *buf)
 
 }
 
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 typedef enum 
 {
 	TypeString = 0x0,
@@ -91,6 +93,7 @@ typedef struct SortedSet
 {
 	ZSetMember *map[TABLE_SIZE];
 	SkipList *list;
+	int size;
 } SortedSet;
 typedef struct Entry {
     char* key;
@@ -813,7 +816,8 @@ void skiplist_traverse(SortedSet *set)
 		zset_map_put(set, current->value, current, rank++);
 		current = current->forward[0];
 	}
-	printf("\n");
+	// printf("\n");
+	set->size = rank;
 }
 
 int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
@@ -1417,6 +1421,43 @@ void *handle_client(void *arg)
 			}
 		}
 
+		else if (strncmp(command, "ZRANGE", strlen("ZRANGE")) == 0)
+		{
+			char *zset_key = tokens[1];
+			int beg = atoi(tokens[2]);
+			int end = atoi(tokens[3]);
+			Entry *e = hashmap_get_entry(map, zset_key);
+
+			snprintf(output_buf, sizeof(output_buf), "*0\r\n");
+			if (e)
+			{
+				int total = e->sorted_set->size;
+				if (beg < 0)
+					beg = total + beg;
+				if (end < 0)
+					end = total + end;
+
+				end = MIN(total, end);
+				int res_count = MIN(end+1-beg, total);
+				int offset = snprintf(output_buf, sizeof(output_buf), "*%d\r\n", res_count);
+
+				SkipList *list = e->sorted_set->list;
+				SortedSetNode *current = list->header->forward[0];
+				int idx = 0;
+				while (current != NULL && idx < beg)
+				{
+					current = current->forward[0];
+					idx++;
+				}
+
+				while (current != NULL && idx <= end)
+				{
+					offset += snprintf(output_buf+offset, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(current->value), current->value);
+					current = current->forward[0];
+					idx++;
+				}				
+			}
+		}
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&
 			strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 && strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) != 0)
 		{	

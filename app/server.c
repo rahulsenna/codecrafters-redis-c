@@ -812,7 +812,9 @@ void skiplist_remove(SkipList *list, double key, char *value)
 
 	for (int i = list->level; i >= 0; i--)
 	{
-		while (current->forward[i] != NULL && current->forward[i]->key < key)
+		while (current->forward[i] != NULL &&
+			   (current->forward[i]->key < key ||
+				(current->forward[i]->key == key && strcmp(current->forward[i]->value, value) < 0)))
 		{
 			current = current->forward[i];
 		}
@@ -839,7 +841,6 @@ void skiplist_remove(SkipList *list, double key, char *value)
 			while (list->level > 0 && list->header->forward[list->level] == NULL)
 				list->level--;
 
-			printf("Deleted key=%f, value=\"%s\"\n", key, value);
 			return;
 		}
 		current = current->forward[0];
@@ -879,16 +880,12 @@ int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
 		zset_map_put(e->sorted_set, zset_member, e->sorted_set->list->header->forward[0], 1);
 		return 1;
 	}
-	unsigned int index = hash(zset_member);
-    ZSetMember* member = e->sorted_set->map[index];
+    ZSetMember* member = zset_get(e->sorted_set, zset_member);
 	int res = 1;
 	if (member)
 	{
 		res = 0;
-		skiplist_remove(e->sorted_set->list, member->value->key, member->value->value);
-		e->sorted_set->map[index] = NULL;
-		free(member->key);
-		free(member);
+		skiplist_remove(e->sorted_set->list, member->value->key, member->key);
 	}
 	skiplist_insert(e->sorted_set->list, key, zset_member);
 	skiplist_traverse(e->sorted_set);
@@ -1389,7 +1386,7 @@ void *handle_client(void *arg)
 		else if (strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) == 0)
 		{
 			char sub[256];
-			sprintf(sub, "%d%s", client_sock, tokens[0]);
+			snprintf(sub, sizeof(sub), "%d%s", client_sock, tokens[0]);
 			subscribe_mode = 1;
 			Entry *subscribe = hashmap_get_entry(map, sub);
 			if (subscribe == NULL)
@@ -1406,7 +1403,7 @@ void *handle_client(void *arg)
 		else if (strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) == 0)
 		{
 			char sub[256];
-			sprintf(sub, "%dSUBSCRIBE", client_sock);
+			snprintf(sub, sizeof(sub), "%dSUBSCRIBE", client_sock);
 
 			Entry *channel = hashmap_get_entry(map, tokens[1]);
 			for (int i = 0; i < channel->list_cnt; ++i)
@@ -1511,6 +1508,22 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", total);
 			}
 		}
+		else if (strncmp(command, "ZSCORE", strlen("ZSCORE")) == 0)
+		{
+			snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+			char *zset_key = tokens[1];
+			Entry *e = hashmap_get_entry(map, zset_key);
+			if (e)
+			{ 
+				char *member_key = tokens[2];
+
+				ZSetMember *member = zset_get(e->sorted_set, member_key);
+				char t_buf[256];
+				snprintf(t_buf, sizeof(t_buf), "%.015lf", member->value->key);
+				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(t_buf), t_buf);
+			}
+		}
+
 		
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&
 			strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 && strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) != 0)

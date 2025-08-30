@@ -974,9 +974,33 @@ coordinates_t decode_coord(uint64_t geo_code)
 
 	return convert_grid_numbers_to_coordinates(grid_latitude_number, grid_longitude_number);
 }
+const double EARTH_RADIUS_IN_METERS = 6372797.560856L;
 static inline double deg_to_rad(double deg)
 {
 	return deg * M_PI / 180.0;
+	
+}
+static inline double rad_to_deg(double rad)
+{
+	return rad / ( 180.0 / M_PI);
+}
+
+double get_distance(coordinates_t coord_a, coordinates_t coord_b)
+{
+	double lat1_rad = deg_to_rad(coord_a.latitude);
+	double lon1_rad = deg_to_rad(coord_a.longitude);
+	double lat2_rad = deg_to_rad(coord_b.latitude);
+	double lon2_rad = deg_to_rad(coord_b.longitude);
+
+	double delta_lat = lat2_rad - lat1_rad;
+	double delta_lon = lon2_rad - lon1_rad;
+
+	double a = sin(delta_lat / 2.0) * sin(delta_lat / 2.0) +
+			   cos(lat1_rad) * cos(lat2_rad) *
+				   sin(delta_lon / 2.0) * sin(delta_lon / 2.0);
+
+	double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+	return EARTH_RADIUS_IN_METERS * c;
 }
 
 void *handle_client(void *arg)
@@ -1701,27 +1725,55 @@ void *handle_client(void *arg)
 				continue;
 			}
 
-			double lat1_rad = deg_to_rad(city1_coords.latitude);
-			double lon1_rad = deg_to_rad(city1_coords.longitude);
-			double lat2_rad = deg_to_rad(city2_coords.latitude);
-			double lon2_rad = deg_to_rad(city2_coords.longitude);
-
-			double delta_lat = lat2_rad - lat1_rad;
-			double delta_lon = lon2_rad - lon1_rad;
-
-			double a = sin(delta_lat / 2.0) * sin(delta_lat / 2.0) + 
-					cos(lat1_rad) * cos(lat2_rad) * 
-					sin(delta_lon / 2.0) * sin(delta_lon / 2.0);
-
-			double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
-
-			double distance_meters = EARTH_RADIUS_IN_METERS * c;
+			double distance_meters = get_distance(city1_coords, city2_coords);
 			char dist_buf[32];
 			snprintf(dist_buf, sizeof(dist_buf), "%.8lf", distance_meters);
 			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(dist_buf), dist_buf);			
 		}
 
-		
+		else if (strncmp(command, "GEOSEARCH", strlen("GEOSEARCH")) == 0)
+		{
+			char *key = tokens[1];
+			char *from_what = tokens[2];
+			double longitude = atof(tokens[3]);
+			double latitude = atof(tokens[4]);
+			char *by_what = tokens[5];
+			double search_radius = atof(tokens[6]);
+			char *unit = tokens[7];
+			
+			snprintf(output_buf, sizeof(output_buf), "*0\r\n");
+
+			Entry *entries = hashmap_get_entry(map, key);
+
+			if (entries == NULL)
+			{
+				write(client_sock, output_buf, strlen(output_buf));
+				continue;
+			}
+
+			coordinates_t search_coor = {.latitude= latitude, .longitude = longitude};
+
+			SkipList *list = entries->sorted_set->list;
+			SortedSetNode *current = list->header->forward[0];
+
+			char temp_buf[BUF_SIZE];
+			int found = 0;
+			int offset = 0;
+			while (current != NULL)
+			{
+				coordinates_t city_coord = decode_coord(current->key);
+				double dist = get_distance(search_coor, city_coord);
+
+				if (dist <= search_radius)
+				{
+					offset += snprintf(temp_buf + offset, sizeof(temp_buf), "$%lu\r\n%s\r\n", strlen(current->value), current->value);
+					found++;
+				}
+				current = current->forward[0];
+			}
+
+			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", found, temp_buf);
+		}
 
 		
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&

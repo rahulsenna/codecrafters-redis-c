@@ -683,7 +683,7 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 	} while (blocking && block_ms == 0);
 
 	if (blocking && things_added == 0)
-		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
+		snprintf(output_buf, BUF_SIZE, "*-1\r\n");
 }
 
 Entry *create_list(char *listname)
@@ -1376,7 +1376,7 @@ void *handle_client(void *arg)
 				list->list_cnt -= 1;
 			} else
 			{
-				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+				snprintf(output_buf, sizeof(output_buf), "*-1\r\n");
 			}
 			pthread_mutex_unlock(&lpop_mutex);
 		}

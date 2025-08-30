@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <poll.h>
 #include <pthread.h>
+#include <math.h>
 
 uint64_t get_curr_time(void) 
 {
@@ -893,6 +894,41 @@ int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
 }
 pthread_mutex_t lpop_mutex;
 
+#define MIN_LATITUDE -85.05112878L
+#define MAX_LATITUDE 85.05112878L
+#define MIN_LONGITUDE -180.0L
+#define MAX_LONGITUDE 180.0L
+
+#define LATITUDE_RANGE (MAX_LATITUDE - MIN_LATITUDE)
+#define LONGITUDE_RANGE (MAX_LONGITUDE - MIN_LONGITUDE)
+
+uint64_t spread_int32_to_int64(uint32_t v)
+{
+	uint64_t result = v;
+	result = (result | (result << 16)) & 0x0000FFFF0000FFFFULL;
+	result = (result | (result << 8))  & 0x00FF00FF00FF00FFULL;
+	result = (result | (result << 4))  & 0x0F0F0F0F0F0F0F0FULL;
+	result = (result | (result << 2))  & 0x3333333333333333ULL;
+	result = (result | (result << 1))  & 0x5555555555555555ULL;
+	return result;
+}
+
+uint64_t coord_encode(double latitude, double longitude)
+{
+	// Normalize to the range 0-2^26
+	double normalized_latitude = pow(2, 26) * (latitude - MIN_LATITUDE) / LATITUDE_RANGE;
+	double normalized_longitude = pow(2, 26) * (longitude - MIN_LONGITUDE) / LONGITUDE_RANGE;
+
+	// Truncate to integers
+	uint32_t lat_int = (uint32_t)normalized_latitude;
+	uint32_t lon_int = (uint32_t)normalized_longitude;
+
+	uint64_t x_spread = spread_int32_to_int64(lat_int);
+	uint64_t y_spread = spread_int32_to_int64(lon_int);
+	uint64_t y_shifted = y_spread << 1;
+	return x_spread | y_shifted;
+}
+
 void *handle_client(void *arg)
 {
 	int subscribe_mode = 0;
@@ -1539,6 +1575,21 @@ void *handle_client(void *arg)
 					snprintf(output_buf, sizeof(output_buf), ":1\r\n");
 				}
 			}			
+		}
+
+		else if (strncmp(command, "GEOADD", strlen("GEOADD")) == 0)
+		{
+			char *key = tokens[1];
+			double longitude = atof(tokens[2]);
+			double latitude = atof(tokens[3]);
+			char *member = tokens[4];
+			if (longitude < MIN_LONGITUDE || longitude > MAX_LONGITUDE || latitude < MIN_LATITUDE || latitude > MAX_LATITUDE)
+			{
+				write(client_sock, "-ERR invalid longitude,latitude pair\r\n" , strlen("-ERR invalid longitude,latitude pair\r\n"));
+				continue;
+			}
+			int res = insert_into_sorted_set(key, member, coord_encode(latitude, longitude));
+			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", res);
 		}
 
 		

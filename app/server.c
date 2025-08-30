@@ -928,6 +928,52 @@ uint64_t coord_encode(double latitude, double longitude)
 	uint64_t y_shifted = y_spread << 1;
 	return x_spread | y_shifted;
 }
+typedef struct
+{
+	double latitude;
+	double longitude;
+} coordinates_t;
+
+uint32_t compact_int64_to_int32(uint64_t v)
+{
+	v = v & 0x5555555555555555ULL;
+	v = (v | (v >> 1))  & 0x3333333333333333ULL;
+	v = (v | (v >> 2))  & 0x0F0F0F0F0F0F0F0FULL;
+	v = (v | (v >> 4))  & 0x00FF00FF00FF00FFULL;
+	v = (v | (v >> 8))  & 0x0000FFFF0000FFFFULL;
+	v = (v | (v >> 16)) & 0x00000000FFFFFFFFULL;
+	return (uint32_t)v;
+}
+
+coordinates_t convert_grid_numbers_to_coordinates(uint32_t grid_latitude_number, uint32_t grid_longitude_number)
+{
+	coordinates_t result;
+
+	// Calculate the grid boundaries
+	double grid_latitude_min = MIN_LATITUDE + LATITUDE_RANGE * (grid_latitude_number / pow(2, 26));
+	double grid_latitude_max = MIN_LATITUDE + LATITUDE_RANGE * ((grid_latitude_number + 1) / pow(2, 26));
+	double grid_longitude_min = MIN_LONGITUDE + LONGITUDE_RANGE * (grid_longitude_number / pow(2, 26));
+	double grid_longitude_max = MIN_LONGITUDE + LONGITUDE_RANGE * ((grid_longitude_number + 1) / pow(2, 26));
+
+	// Calculate the center point of the grid cell
+	result.latitude = (grid_latitude_min + grid_latitude_max) / 2;
+	result.longitude = (grid_longitude_min + grid_longitude_max) / 2;
+
+	return result;
+}
+
+coordinates_t decode_coord(uint64_t geo_code)
+{
+	// Align bits of both latitude and longitude to take even-numbered position
+	uint64_t y = geo_code >> 1;
+	uint64_t x = geo_code;
+
+	// Compact bits back to 32-bit ints
+	uint32_t grid_latitude_number = compact_int64_to_int32(x);
+	uint32_t grid_longitude_number = compact_int64_to_int32(y);
+
+	return convert_grid_numbers_to_coordinates(grid_latitude_number, grid_longitude_number);
+}
 
 void *handle_client(void *arg)
 {
@@ -1590,6 +1636,38 @@ void *handle_client(void *arg)
 			}
 			int res = insert_into_sorted_set(key, member, coord_encode(latitude, longitude));
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", res);
+		}
+
+		else if (strncmp(command, "GEOPOS", strlen("GEOPOS")) == 0)
+		{
+			char *key = tokens[1];
+			snprintf(output_buf, sizeof(output_buf), "*1\r\n*-1\r\n");
+			Entry *entries = hashmap_get_entry(map, key);
+			int place_cnt = query_cnt - 2;
+			int offset = snprintf(output_buf, sizeof(output_buf), "*%d\r\n", place_cnt);
+			for (int i = 2; i < query_cnt; ++i)
+			{
+				char *member_key = tokens[i];
+				ZSetMember *member = NULL;
+				if (entries)
+					member = zset_get(entries->sorted_set, member_key);
+
+				if (member)
+				{
+					coordinates_t coords = decode_coord(member->value->key);
+
+					char long_str[32];
+					snprintf(long_str, 32, "%.15lf", coords.longitude);
+
+					char lat_str[32];
+					snprintf(lat_str, 32, "%.15lf", coords.latitude);
+
+
+					offset += snprintf(output_buf + offset, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(long_str), long_str, strlen(lat_str), lat_str);
+				}
+				else
+					offset += snprintf(output_buf + offset, sizeof(output_buf), "*-1\r\n");
+			}
 		}
 
 		

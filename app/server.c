@@ -974,6 +974,10 @@ coordinates_t decode_coord(uint64_t geo_code)
 
 	return convert_grid_numbers_to_coordinates(grid_latitude_number, grid_longitude_number);
 }
+static inline double deg_to_rad(double deg)
+{
+	return deg * M_PI / 180.0;
+}
 
 void *handle_client(void *arg)
 {
@@ -1669,6 +1673,55 @@ void *handle_client(void *arg)
 					offset += snprintf(output_buf + offset, sizeof(output_buf), "*-1\r\n");
 			}
 		}
+
+		else if (strncmp(command, "GEODIST", strlen("GEODIST")) == 0)
+		{
+			const double EARTH_RADIUS_IN_METERS = 6372797.560856L;
+			
+			char *key = tokens[1];
+			char *city1 = tokens[2];
+			char *city2 = tokens[3];
+
+			Entry *entries = hashmap_get_entry(map, key);
+
+			ZSetMember *city1_data	 = NULL;
+			if (entries)
+				city1_data = zset_get(entries->sorted_set, city1);
+			coordinates_t city1_coords = decode_coord(city1_data->value->key);
+		
+			ZSetMember *city2_data	 = NULL;
+			if (entries)
+				city2_data = zset_get(entries->sorted_set, city2);
+			coordinates_t city2_coords = decode_coord(city2_data->value->key);
+
+			if (city1_data == NULL || city2_data == NULL)
+			{
+				snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
+				write(client_sock, output_buf, strlen(output_buf));
+				continue;
+			}
+
+			double lat1_rad = deg_to_rad(city1_coords.latitude);
+			double lon1_rad = deg_to_rad(city1_coords.longitude);
+			double lat2_rad = deg_to_rad(city2_coords.latitude);
+			double lon2_rad = deg_to_rad(city2_coords.longitude);
+
+			double delta_lat = lat2_rad - lat1_rad;
+			double delta_lon = lon2_rad - lon1_rad;
+
+			double a = sin(delta_lat / 2.0) * sin(delta_lat / 2.0) + 
+					cos(lat1_rad) * cos(lat2_rad) * 
+					sin(delta_lon / 2.0) * sin(delta_lon / 2.0);
+
+			double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+
+			double distance_meters = EARTH_RADIUS_IN_METERS * c;
+			char dist_buf[32];
+			snprintf(dist_buf, sizeof(dist_buf), "%.8lf", distance_meters);
+			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(dist_buf), dist_buf);			
+		}
+
+		
 
 		
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&

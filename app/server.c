@@ -326,7 +326,7 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 int db_map_size, replication_port, port;
 HashMap* map;
 
-void *handshake()
+void *handshake(void *arg)
 {
 	struct sockaddr_in master_addr = {
 		.sin_family = AF_INET,

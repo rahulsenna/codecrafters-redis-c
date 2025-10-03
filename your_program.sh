@@ -21,8 +21,8 @@ set -e # Exit early if any commands fail
 #
 # - Edit this to change how your program runs locally
 # - Edit .codecrafters/run.sh to change how your program runs remotely
-# exec /tmp/codecrafters-build-redis-c "$@"
-exec /Users/agentofchaos/dev/codecrafters-projects/codecrafters-redis-c/build/redis "$@"
+exec /tmp/codecrafters-build-redis-c "$@"
+# exec /Users/agentofchaos/dev/codecrafters-projects/codecrafters-redis-c/build/redis "$@"
 # exec osascript -e 'tell application "System Events" to key code 100'
 # lldb -o "source list" -o "run"   -- /tmp/codecrafters-build-redis-c "$@"
 # exec osascript -e 'tell application "Visual Studio Code" to activate' -e 'tell application "System Events" to key code 100'

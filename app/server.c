@@ -502,7 +502,7 @@ void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[
 	uint64_t expiry_time = UINT64_MAX;
 	
 
-	if (tokens[3] && strncmp(tokens[3], "px", strlen("px")) == 0)
+	if (tokens[3] && (strncmp(tokens[3], "px", 2) == 0 || strncmp(tokens[3], "PX", 2) == 0))
 	{
 		uint64_t curr_time = get_curr_time();
 		expiry_time = curr_time + atoll(tokens[4]);

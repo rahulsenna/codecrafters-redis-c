@@ -975,7 +975,7 @@ coordinates_t decode_coord(uint64_t geo_code)
 
 	return convert_grid_numbers_to_coordinates(grid_latitude_number, grid_longitude_number);
 }
-const double EARTH_RADIUS_IN_METERS = 6372797.560856L;
+const double EARTH_RADIUS_IN_METERS = 6372797.560856;
 static inline double deg_to_rad(double deg)
 {
 	return deg * M_PI / 180.0;
@@ -1308,9 +1308,11 @@ void *handle_client(void *arg)
 		{
 			
 			char *stream_key = tokens[1];
-			uint64_t start_time, end_time;
-			int start_seq, end_seq = INT_MAX;
-			sscanf(tokens[2], "%llu-%d", &start_time, &start_seq);
+			uint64_t start_time = 0, end_time;
+      int start_seq = 0, end_seq = INT_MAX;
+      if (strncmp(tokens[2], "-", strlen("-")) != 0)
+        sscanf(tokens[2], "%llu-%d", &start_time, &start_seq);
+			
 			sscanf(tokens[3], "%llu-%d", &end_time, &end_seq);
 			
 			char temp_buff[1024];

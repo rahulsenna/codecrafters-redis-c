@@ -13,6 +13,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <math.h>
+#include <stdint.h>
 
 uint64_t get_curr_time(void) 
 {
@@ -490,7 +491,7 @@ void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[
 
 	if (val && val->expiry > get_curr_time())
 	{
-		snprintf(output_buf, BUF_SIZE, "+%s\r\n", val->value);
+		snprintf(output_buf, BUF_SIZE, "$%lu\r\n%s\r\n", strlen(val->value), val->value);
 	}
 	else
 		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
@@ -1044,7 +1045,7 @@ void *handle_client(void *arg)
 		}
 		else if (strncmp(command, "ECHO", strlen("ECHO")) == 0)
 		{
-			snprintf(output_buf, sizeof(output_buf), "+%s\r\n", tokens[1]);
+			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(tokens[1]), tokens[1]);
 		}
 		else if (strncmp(command, "SET", strlen("SET")) == 0)
 		{

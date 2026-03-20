@@ -29,22 +29,29 @@ uint64_t get_curr_time(void)
 
 #define TABLE_SIZE 100
 
+#ifdef DEBUG_BUILD
+#  define DEBUG(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+#else
+#  define DEBUG(fmt, ...) do {} while (0)
+#endif
+
+
 void print_resp(char *title, char *buf)
 {
 	size_t len = strlen(buf);
-	printf("%s-----------[  ", title);
+	DEBUG("%s-----------[  ", title);
 	for (size_t i = 0; i < len; ++i)
 	{
 		 if (buf[i] == '\r')
-		 	printf("\\r");
+		 	DEBUG("\\r");
 		 else if (buf[i] == '\n')
-		 	printf("\\n");
+		 	DEBUG("\\n");
 		else if(buf[i] == 0)
-			printf("*NULL-TERM*");
+			DEBUG("*NULL-TERM*");
 		else
-			printf("%c", buf[i]);
+			DEBUG("%c", buf[i]);
 	}
-	printf("   ]-----------\n");
+	DEBUG("   ]-----------\n");
 
 }
 
@@ -251,7 +258,7 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 		return 0;
 	unsigned char buffer[1024 * 10];
 	size_t bytes_read = fread(buffer, sizeof(unsigned char), 1024 * 10, rdbfile);
-	printf("bytes_read: %lu\n", bytes_read);
+	DEBUG("bytes_read: %lu\n", bytes_read);
 
 	int byte_idx = 0;
 	while(buffer[byte_idx] != 0xfb)
@@ -388,14 +395,14 @@ void *handshake(void *arg)
 	}
 	size_t rdb_file_bytes;
 	sscanf(rdb_preamble, "$%lu", &rdb_file_bytes);
-	printf("rdb_file_bytes: %lu\n", rdb_file_bytes);
+	DEBUG("rdb_file_bytes: %lu\n", rdb_file_bytes);
 
 	char *rdb_buffer = strstr(rdb_preamble, "\n") + 1;
 
 	size_t end_rdb_buffer = (rdb_buffer+rdb_file_bytes) - buf;
 	
-	printf("end_rdb_buffer: %lu\n", end_rdb_buffer);
-	printf("bytes_read: %lu\n", bytes_read);
+	DEBUG("end_rdb_buffer: %lu\n", end_rdb_buffer);
+	DEBUG("bytes_read: %lu\n", bytes_read);
 
 	if (end_rdb_buffer < bytes_read)
 	{
@@ -856,11 +863,11 @@ void skiplist_traverse(SortedSet *set)
 	int rank = 0;
 	while (current != NULL)
 	{
-		// printf("[%f:\"%s\"] ",  current->key, current->value);
+		// DEBUG("[%f:\"%s\"] ",  current->key, current->value);
 		zset_map_put(set, current->value, current, rank++);
 		current = current->forward[0];
 	}
-	// printf("\n");
+	// DEBUG("\n");
 	set->size = rank;
 }
 
@@ -1009,7 +1016,7 @@ void *handle_client(void *arg)
 	int subscribe_mode = 0;
 	int client_sock = *(int *)arg;
     free(arg);
-    printf("Client connected - port: %d - client_sock: %d\n", port, client_sock);
+    DEBUG("Client connected - port: %d - client_sock: %d\n", port, client_sock);
 
 
     char req_buf[1024];
@@ -1026,14 +1033,15 @@ void *handle_client(void *arg)
 		char *saveptr;  // Save pointer for the outer tokenization
 		int query_cnt = atoi(strtok_r(query, "\r\n", &saveptr));
 		char *tokens[10];
+    DEBUG("PORT: %d ", port);
 		for (int i = 0; i < query_cnt; ++i)
 		{
 			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
 			char *token = strtok_r(NULL, "\r\n", &saveptr);
 			tokens[i] = token;
-			printf("%d tokens[%d]: %s | ", port, i, tokens[i]);
+			DEBUG("tok%d: %s | ", i, tokens[i]);
 		}
-		printf("\n");
+		DEBUG("\n");
 
 		char *command = tokens[0];
 		for (char *c = command; *c; ++c)
@@ -1111,7 +1119,7 @@ void *handle_client(void *arg)
 				  "$88\r\n\x52\x45\x44\x49\x53\x30\x30\x31\x31\xfa\x09\x72\x65\x64\x69\x73\x2d\x76\x65\x72\x05\x37\x2e\x32\x2e\x30\xfa\x0a\x72\x65\x64\x69\x73\x2d\x62\x69\x74\x73\xc0\x40\xfa\x05\x63\x74\x69\x6d\x65\xc2\x6d\x08\xbc\x65\xfa\x08\x75\x73\x65\x64\x2d\x6d\x65\x6d\xc2\xb0\xc4\x10\x00\xfa\x08\x61\x6f\x66\x2d\x62\x61\x73\x65\xc0\x00\xff\xf0\x6e\x3b\xfe\xc0\xff\x5a\xa2",
 				  88 + 5);
 			replica_socks[replica_socks_cnt++] = client_sock;
-			printf("replica_sock: %d\n", client_sock);
+			DEBUG("replica_sock: %d\n", client_sock);
 			return 0;
 		}
 		else if ((strncmp(command, "WAIT", strlen("WAIT")) == 0))
@@ -1126,8 +1134,8 @@ void *handle_client(void *arg)
 			int timeout_ms = atoi(tokens[2]);
 			int min_replica_processed_cnt = atoi(tokens[1]);
 
-			printf("replica_socks_cnt: %d\n", replica_socks_cnt);
-			printf("min_replica_processed_cnt: %d\n", min_replica_processed_cnt);
+			DEBUG("replica_socks_cnt: %d\n", replica_socks_cnt);
+			DEBUG("min_replica_processed_cnt: %d\n", min_replica_processed_cnt);
 
 			char buf[1024];
 			int out = 0;
@@ -1162,7 +1170,7 @@ void *handle_client(void *arg)
 
 				if (remaining_ms <= 0)
 				{
-					printf("Total timeout reached, stopping polling.\n");
+					DEBUG("Total timeout reached, stopping polling.\n");
 					break;
 				}
 
@@ -1831,10 +1839,10 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	printf("Config[ArgDirName]: %s\n", config[ArgDirName]);
-	printf("Config[ArgFileName]: %s\n", config[ArgFileName]);
+	DEBUG("Config[ArgDirName]: %s\n", config[ArgDirName]);
+	DEBUG("Config[ArgFileName]: %s\n", config[ArgFileName]);
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	printf("Logs from your program will appear here!\n");
+	DEBUG("Logs from your program will appear here!\n");
 
 	map = hashmap_create();
 
@@ -1844,7 +1852,7 @@ int main(int argc, char *argv[]) {
 	//
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
-		printf("Socket creation failed: %s...\n", strerror(errno));
+		DEBUG("Socket creation failed: %s...\n", strerror(errno));
 		return 1;
 	}
 	
@@ -1852,7 +1860,7 @@ int main(int argc, char *argv[]) {
 	// ensures that we don't run into 'Address already in use' errors
 	int reuse = 1;
 	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-		printf("SO_REUSEADDR failed: %s \n", strerror(errno));
+		DEBUG("SO_REUSEADDR failed: %s \n", strerror(errno));
 		return 1;
 	}
 	
@@ -1862,7 +1870,7 @@ int main(int argc, char *argv[]) {
 									};
 	
 	if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) != 0) {
-		printf("Bind failed: %s \n", strerror(errno));
+		DEBUG("Bind failed: %s \n", strerror(errno));
 		return 1;
 	}
 	
@@ -1877,11 +1885,11 @@ int main(int argc, char *argv[]) {
 	}	
 	int connection_backlog = 5;
 	if (listen(server_fd, connection_backlog) != 0) {
-		printf("Listen failed: %s \n", strerror(errno));
+		DEBUG("Listen failed: %s \n", strerror(errno));
 		return 1;
 	}
 	
-	printf("Waiting for a client to connect...\n");
+	DEBUG("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 	
 

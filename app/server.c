@@ -1786,7 +1786,17 @@ void *handle_client(void *arg)
 
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", found, temp_buf);
 		}
-
+    else if (strncmp(command, "ACL", strlen("ACL")) == 0)
+    {
+      if (strncmp(tokens[1], "WHOAMI", strlen("WHOAMI")) == 0)
+      {
+        snprintf(output_buf, sizeof(output_buf), "$7\r\ndefault\r\n", 0);
+      } else if (strncmp(tokens[1], "GETUSER", strlen("GETUSER")) == 0)
+      {
+        snprintf(output_buf, sizeof(output_buf),
+          "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n");
+      }
+    }
 		
 		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&
 			strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 && strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) != 0)

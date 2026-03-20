@@ -56,6 +56,18 @@ void print_resp(char *title, char *buf)
 
 }
 
+void get_hashed_str(char* raw_str, BYTE  hashed_str[SHA256_BLOCK_SIZE * 2 + 1])
+{
+  SHA256_CTX sha256ctx;
+  sha256_init(&sha256ctx);
+  sha256_update(&sha256ctx, raw_str, strlen(raw_str));
+  char sha_hash_out[SHA256_BLOCK_SIZE];
+  sha256_final(&sha256ctx, sha_hash_out);
+  for (int i = 0; i < SHA256_BLOCK_SIZE; i++)
+    sprintf(hashed_str + (i * 2), "%02x", sha_hash_out[i]);
+  hashed_str[SHA256_BLOCK_SIZE * 2] = '\0';
+}
+
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 typedef enum 
@@ -1804,23 +1816,30 @@ void *handle_client(void *arg)
       } else if (strncmp(tokens[1], "SETUSER", strlen("SETUSER")) == 0)
       {
         BYTE hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
-
-        SHA256_CTX sha256ctx;
-        sha256_init(&sha256ctx);
-        char* raw_pass = tokens[3] + 1;
-        sha256_update(&sha256ctx, raw_pass, strlen(raw_pass));
-        char sha_hash_out[SHA256_BLOCK_SIZE];
-        sha256_final(&sha256ctx, sha_hash_out);
-        for (int i = 0; i < SHA256_BLOCK_SIZE; i++)
-          sprintf(hashed_pass + (i * 2), "%02x", sha_hash_out[i]);
-        hashed_pass[SHA256_BLOCK_SIZE * 2] = '\0';
-
+        get_hashed_str(tokens[3] + 1 /*skipping > */, hashed_pass);
 
         char username[256];
         snprintf(username, sizeof(username), "userid:%s", tokens[2]);
         hashmap_put(map, username, hashed_pass, UINT64_MAX, TypeString);
 
         snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+      }
+    }
+    else if (strncmp(command, "AUTH", strlen("AUTH")) == 0)
+    {
+      strcpy(output_buf, "-WRONGPASS invalid username-password pair or user is disabled.\r\n");
+
+      char username[256];
+      snprintf(username, sizeof(username), "userid:%s", tokens[1]);
+      char* pass = hashmap_get(map, username);
+      if (pass)
+      {
+        BYTE hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
+        get_hashed_str(tokens[2], hashed_pass);
+        if (strcmp(hashed_pass, pass) == 0)
+        {
+          strcpy(output_buf, "+OK\r\n");
+        }
       }
     }
 		

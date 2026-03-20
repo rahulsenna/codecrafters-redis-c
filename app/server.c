@@ -1028,6 +1028,7 @@ void *handle_client(void *arg)
 	int trans_queue_cnt = 0;
 	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 	{
+    req_buf[bytes_read] = 0;
 		memcpy(req_buf2, req_buf, 1024);
 		char *query = req_buf + 1;
 		char *saveptr;  // Save pointer for the outer tokenization

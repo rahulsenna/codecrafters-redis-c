@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <math.h>
 #include <stdint.h>
+#include "sha256.h"
 
 uint64_t get_curr_time(void) 
 {
@@ -1793,8 +1794,33 @@ void *handle_client(void *arg)
         snprintf(output_buf, sizeof(output_buf), "$7\r\ndefault\r\n", 0);
       } else if (strncmp(tokens[1], "GETUSER", strlen("GETUSER")) == 0)
       {
-        snprintf(output_buf, sizeof(output_buf),
-          "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n");
+        char username[256];
+        snprintf(username, sizeof(username), "userid:%s", tokens[2]);
+        char* pass = hashmap_get(map, username);
+        if (pass)
+          snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*0\r\n$9\r\npasswords\r\n*1\r\n$%d\r\n%s\r\n", strlen(pass), pass);
+        else
+          snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n");
+      } else if (strncmp(tokens[1], "SETUSER", strlen("SETUSER")) == 0)
+      {
+        BYTE hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
+
+        SHA256_CTX sha256ctx;
+        sha256_init(&sha256ctx);
+        char* raw_pass = tokens[3] + 1;
+        sha256_update(&sha256ctx, raw_pass, strlen(raw_pass));
+        char sha_hash_out[SHA256_BLOCK_SIZE];
+        sha256_final(&sha256ctx, sha_hash_out);
+        for (int i = 0; i < SHA256_BLOCK_SIZE; i++)
+          sprintf(hashed_pass + (i * 2), "%02x", sha_hash_out[i]);
+        hashed_pass[SHA256_BLOCK_SIZE * 2] = '\0';
+
+
+        char username[256];
+        snprintf(username, sizeof(username), "userid:%s", tokens[2]);
+        hashmap_put(map, username, hashed_pass, UINT64_MAX, TypeString);
+
+        snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
       }
     }
 		

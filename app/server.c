@@ -56,11 +56,11 @@ void print_resp(char *title, char *buf)
 
 }
 
-void get_hashed_str(char* raw_str, BYTE  hashed_str[SHA256_BLOCK_SIZE * 2 + 1])
+void get_hashed_str(const BYTE data[], char  hashed_str[SHA256_BLOCK_SIZE * 2 + 1])
 {
   SHA256_CTX sha256ctx;
   sha256_init(&sha256ctx);
-  sha256_update(&sha256ctx, raw_str, strlen(raw_str));
+  sha256_update(&sha256ctx, data, strlen((char*) data));
   BYTE sha_hash_out[SHA256_BLOCK_SIZE];
   sha256_final(&sha256ctx, sha_hash_out);
   for (int i = 0; i < SHA256_BLOCK_SIZE; i++)
@@ -316,7 +316,7 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 
 		//--------[ Key ]--------------------------------------------------------------
 		int key_len = (int)buffer[byte_idx++];
-		char *key = malloc(sizeof(char)*key_len);
+    char* key = (char*) malloc(sizeof(char) * key_len);
 		strncpy(key, (char *)buffer + byte_idx, key_len);
 		key[key_len] = '\0';
 
@@ -349,11 +349,11 @@ HashMap* map;
 
 void *handshake(void *arg)
 {
-	struct sockaddr_in master_addr = {
-		.sin_family = AF_INET,
-		.sin_port = htons(replication_port),
-		.sin_addr.s_addr = INADDR_ANY,
-	};
+  struct sockaddr_in master_addr = {};
+  master_addr.sin_family = AF_INET;
+  master_addr.sin_port = htons(replication_port);
+  master_addr.sin_addr.s_addr = INADDR_ANY;
+   
 	int sock = socket(AF_INET, SOCK_STREAM, 0);
 
 	if (connect(sock, (struct sockaddr *)&master_addr, sizeof(master_addr)) == -1)
@@ -709,9 +709,9 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 
 Entry *create_list(char *listname)
 {
-	Entry *list = calloc(1, sizeof(Entry));
+  Entry* list = (Entry*) calloc(1, sizeof(Entry));
 	list->key = strdup(listname);
-	list->list = calloc(100, sizeof(char *));
+  list->list = (char**) calloc(100, sizeof(char*));
 	list->list += 50; // pointer to the middle (So LPUSH is easy)
 	list->list_cnt = 0;
 	list->expiry = UINT64_MAX;
@@ -779,7 +779,7 @@ SkipList *create_skip_list()
 {
 	SkipList* list = (SkipList*)malloc(sizeof(SkipList));
     
-    list->header = skiplist_create_node(-1, "", MAX_LEVEL);
+    list->header = skiplist_create_node(-1, (char*) "", MAX_LEVEL);
     list->level = 0;
     return list;
 }
@@ -891,7 +891,7 @@ int insert_into_sorted_set(char *zset_key, char *zset_member, double key)
 	{
 		hashmap_put(map, zset_key, "", UINT64_MAX, TypeSortedSet);
 		e = hashmap_get_entry(map, zset_key);
-		e->sorted_set = calloc(1, sizeof(SortedSet));
+    e->sorted_set = (SortedSet*) calloc(1, sizeof(SortedSet));
 		e->sorted_set->list = create_skip_list();
 		skiplist_insert(e->sorted_set->list, key, zset_member);
 		e->sorted_set->size = 1;
@@ -1271,7 +1271,7 @@ void *handle_client(void *arg)
 					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", strlen(tokens[i]), tokens[i]);
 
 				val = hashmap_get_entry(map, entry_key);
-				val->stream = calloc(1, sizeof(StreamEntry));
+        val->stream = (StreamEntry*) calloc(1, sizeof(StreamEntry));
 				val->stream->ms_time = ms_time;
 				val->stream->sequence_num = sequence_num;
 				val->stream->str = strdup(stream_resp);
@@ -1315,7 +1315,7 @@ void *handle_client(void *arg)
 					for (int i = 3; i < query_cnt; ++i)
 						stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", strlen(tokens[i]), tokens[i]);
 
-					stream_entry->next = calloc(1, sizeof(StreamEntry));
+          stream_entry->next = (StreamEntry*) calloc(1, sizeof(StreamEntry));
 					stream_entry = stream_entry->next;
 					stream_entry->ms_time = ms_time;
 					stream_entry->sequence_num = sequence_num;
@@ -1819,8 +1819,8 @@ void *handle_client(void *arg)
           snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n");
       } else if (strncmp(tokens[1], "SETUSER", strlen("SETUSER")) == 0)
       {
-        BYTE hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
-        get_hashed_str(tokens[3] + 1 /*skipping > */, hashed_pass);
+        char hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
+        get_hashed_str((const BYTE*) (tokens[3] + 1) /*skipping > */, hashed_pass);
 
         char username[256];
         snprintf(username, sizeof(username), "userid:%s", tokens[2]);
@@ -1839,8 +1839,8 @@ void *handle_client(void *arg)
       char* pass = hashmap_get(map, username);
       if (pass)
       {
-        BYTE hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
-        get_hashed_str(tokens[2], hashed_pass);
+        char hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
+        get_hashed_str((const BYTE*) tokens[2], hashed_pass);
         if (strcmp(hashed_pass, pass) == 0)
         {
           strcpy(output_buf, "+OK\r\n");
@@ -1972,7 +1972,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		// Pass client socket to thread
-		int *client_sock_ptr = malloc(sizeof(int));
+    int* client_sock_ptr = (int*) malloc(sizeof(int));
 		*client_sock_ptr = client_sock;
 
 		pthread_t thread_id;

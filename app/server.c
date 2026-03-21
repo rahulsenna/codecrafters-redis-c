@@ -1026,6 +1026,7 @@ double get_distance(coordinates_t coord_a, coordinates_t coord_b)
 
 void *handle_client(void *arg)
 {
+  int authenticated = 0;
 	int subscribe_mode = 0;
 	int client_sock = *(int *)arg;
     free(arg);
@@ -1803,7 +1804,10 @@ void *handle_client(void *arg)
     {
       if (strncmp(tokens[1], "WHOAMI", strlen("WHOAMI")) == 0)
       {
-        snprintf(output_buf, sizeof(output_buf), "$7\r\ndefault\r\n", 0);
+        if (hashmap_get(map, "userid:default") && !authenticated)
+          strcpy(output_buf, "-NOAUTH Authentication required\r\n");
+        else
+          strcpy(output_buf, "$7\r\ndefault\r\n");
       } else if (strncmp(tokens[1], "GETUSER", strlen("GETUSER")) == 0)
       {
         char username[256];
@@ -1822,7 +1826,8 @@ void *handle_client(void *arg)
         snprintf(username, sizeof(username), "userid:%s", tokens[2]);
         hashmap_put(map, username, hashed_pass, UINT64_MAX, TypeString);
 
-        snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
+        strcpy(output_buf, "+OK\r\n");
+        authenticated = 1;
       }
     }
     else if (strncmp(command, "AUTH", strlen("AUTH")) == 0)
@@ -1839,6 +1844,7 @@ void *handle_client(void *arg)
         if (strcmp(hashed_pass, pass) == 0)
         {
           strcpy(output_buf, "+OK\r\n");
+          authenticated = 1;
         }
       }
     }

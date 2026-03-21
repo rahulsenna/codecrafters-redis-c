@@ -61,7 +61,7 @@ void get_hashed_str(char* raw_str, BYTE  hashed_str[SHA256_BLOCK_SIZE * 2 + 1])
   SHA256_CTX sha256ctx;
   sha256_init(&sha256ctx);
   sha256_update(&sha256ctx, raw_str, strlen(raw_str));
-  char sha_hash_out[SHA256_BLOCK_SIZE];
+  BYTE sha_hash_out[SHA256_BLOCK_SIZE];
   sha256_final(&sha256ctx, sha_hash_out);
   for (int i = 0; i < SHA256_BLOCK_SIZE; i++)
     sprintf(hashed_str + (i * 2), "%02x", sha_hash_out[i]);

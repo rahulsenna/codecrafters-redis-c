@@ -1062,6 +1062,25 @@ void *handle_client(void *arg)
 		for (char *c = command; *c; ++c)
 			*c = toupper(*c);
 
+
+    if (subscribe_mode &&
+      !(strcmp(command, "SUBSCRIBE") == 0 ||
+      strcmp(command, "UNSUBSCRIBE") == 0 ||
+      strcmp(command, "PSUBSCRIBE") == 0 ||
+      strcmp(command, "PUNSUBSCRIBE") == 0 ||
+      strcmp(command, "QUIT") == 0 ||
+      strcmp(command, "RESET") == 0))
+    {
+      if (strcmp(command, "PING") == 0)
+        snprintf(output_buf, sizeof(output_buf), "*2\r\n$4\r\npong\r\n$0\r\n\r\n");
+      else
+        snprintf(output_buf, sizeof(output_buf),
+          "-ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n",
+          command);
+      write(client_sock, output_buf, strlen(output_buf));
+      continue;
+    }
+
 		if (strncmp(command, "PING", strlen("PING")) == 0)
 		{
 			snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
@@ -1849,14 +1868,6 @@ void *handle_client(void *arg)
       }
     }
 		
-		if (subscribe_mode && strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) != 0 &&
-			strncmp(command, "PUBLISH", strlen("PUBLISH")) != 0 && strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) != 0)
-		{	
-			if (strncmp(command, "PING", strlen("PING")) == 0)
-				snprintf(output_buf, sizeof(output_buf), "*2\r\n$4\r\npong\r\n$0\r\n\r\n");
-			else
-				snprintf(output_buf, sizeof(output_buf), "-ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n", command);
-		}
 
 		write(client_sock, output_buf, strlen(output_buf));
 	}

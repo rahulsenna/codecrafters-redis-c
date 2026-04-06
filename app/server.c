@@ -1867,6 +1867,13 @@ void *handle_client(void *arg)
         }
       }
     }
+    else if (strncmp(command, "WATCH", strlen("WATCH")) == 0)
+    {
+      if (is_multi)
+        strcpy(output_buf, "-ERR WATCH inside MULTI is not allowed\r\n");
+      else
+        strcpy(output_buf, "+OK\r\n");
+    }
 		
 
 		write(client_sock, output_buf, strlen(output_buf));

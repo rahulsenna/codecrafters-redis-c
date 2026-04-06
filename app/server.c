@@ -16,6 +16,73 @@
 #include <stdint.h>
 #include "sha256.h"
 
+
+#include <signal.h>
+#include <execinfo.h>  // for backtrace (Linux/glibc)
+
+#if 0
+void crash_handler(int signum) {
+  // Get a stack trace
+  void *bt[32];
+  int bt_size = backtrace(bt, 32);
+  char **bt_syms = backtrace_symbols(bt, bt_size);
+
+  fprintf(stderr, "\n=== CRASH DETECTED (signal %d) ===\n", signum);
+
+  if (bt_syms) {
+    for (int i = 0; i < bt_size; i++) {
+      fprintf(stderr, "  [%d] %s\n", i, bt_syms[i]);
+    }
+    free(bt_syms);
+  }
+
+  fprintf(stderr, "=================================\n");
+  fflush(stderr);
+
+  // Re-raise so the OS records the crash properly (core dump, etc.)
+  signal(signum, SIG_DFL);
+  raise(signum);
+}
+#endif
+
+void crash_handler(int signum) {
+    void *bt[32];
+    int size = backtrace(bt, 32);
+    char **syms = backtrace_symbols(bt, size);
+
+    fprintf(stderr, "=== CRASH (signal %d) ===\n", signum);
+
+    char cmd[512];
+    for (int i = 0; i < size; i++) {
+        // Print the raw symbol line
+        fprintf(stderr, "%s\n", syms[i]);
+
+        // Resolve file:line via addr2line
+        snprintf(cmd, sizeof(cmd),
+            "addr2line -e /proc/%d/exe -f -i -p %p 1>&2", getpid(), bt[i]);
+        system(cmd);  // unsafe but fine — process is dying anyway
+    }
+
+    free(syms);
+    signal(signum, SIG_DFL);
+    raise(signum);
+}
+
+// Call this at the top of main()
+void setup_crash_handler(void) {
+  struct sigaction sa;
+  sa.sa_handler = crash_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESETHAND;  // restore default after first signal
+
+  sigaction(SIGSEGV, &sa, NULL);  // segfault
+  sigaction(SIGABRT, &sa, NULL);  // abort() / assert()
+  sigaction(SIGFPE,  &sa, NULL);  // divide by zero
+  sigaction(SIGBUS,  &sa, NULL);  // misaligned memory
+  sigaction(SIGILL,  &sa, NULL);  // illegal instruction
+
+
+}
 uint64_t get_curr_time(void) 
 {
     struct timeval tv;
@@ -117,20 +184,22 @@ typedef struct SortedSet
 	SkipList *list;
 	int size;
 } SortedSet;
-typedef struct Entry {
-    char* key;
-	char *value;
-	uint64_t expiry;
-    struct Entry* next;
-	EntryType type;
-	union
-	{
-		SortedSet *sorted_set;
-		StreamEntry *stream; // For TypeStream entries
-		char **list;
-	};
+typedef struct Entry
+{
+  char* key;
+  char* value;
+  uint64_t expiry;
+  struct Entry* next;
+  EntryType type;
+  union
+  {
+    SortedSet* sorted_set;
+    StreamEntry* stream; // For TypeStream entries
+    char** list;
+    int client_socket;
+  };
 
-	int list_cnt;
+  int list_cnt;
 } Entry;
 
 typedef struct HashMap {
@@ -346,6 +415,77 @@ int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 
 int db_map_size, replication_port, port;
 HashMap* map;
+
+typedef struct Watched
+{
+  char* key;
+  int socket;
+  struct Watched* next;
+} Watched;
+
+Watched* watch_head;
+
+void push_watched(Watched** head, char* key, int socket)
+{
+  Watched* node = (Watched*) malloc(sizeof(Watched));
+  node->key = strdup(key);
+  node->socket = socket;
+  node->next = (*head);
+  (*head) = node;
+}
+
+void removed_watched(Watched** head, char* key)
+{
+  Watched* temp = *head, * prev;
+  if (temp != NULL && strcmp(temp->key, key) == 0)
+  {
+    *head = temp->next;
+    free(temp->key);
+    free(temp);
+    return;
+  }
+  while (temp != NULL && strcmp(temp->key, key) != 0)
+  {
+    prev = temp;
+    temp = temp->next;
+  }
+  if (temp == NULL)
+    return;
+
+  prev->next = temp->next;
+  free(temp->key);
+  free(temp);
+}
+
+Watched* get_watched(char* key)
+{
+  Watched* curr = watch_head;
+  while (curr != NULL)
+  {
+    if (strcmp(curr->key, key) == 0)
+      return curr;
+    curr = curr->next;
+  }
+  return 0;
+}
+
+void clear_watch_list()
+{
+  Watched* tmp = watch_head, * prev = NULL;
+  while (tmp != NULL)
+  {
+    Watched* next_node = tmp->next;
+    if (prev == NULL)
+      watch_head = next_node;
+    else
+      prev->next = next_node;
+    free(tmp->key);
+    free(tmp);
+    tmp = next_node;
+  }
+  watch_head = NULL;
+}
+
 
 void *handshake(void *arg)
 {
@@ -581,7 +721,7 @@ void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens
 	}
 }
 
-void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_queue[100], int trans_queue_cnt)
+void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_queue[100], int trans_queue_cnt, int client_socket)
 {
 	if (is_multi == 0)
 	{
@@ -594,6 +734,29 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 		return;
 	}
 
+  int abort_txn = 0;
+  Watched* tmp = watch_head, * prev = NULL;
+  while (tmp != NULL)
+  {
+    Watched* next_node = tmp->next;
+    if (tmp->socket != client_socket)
+    {
+      abort_txn = 1;
+      break;
+    }
+      
+    prev = tmp;
+    tmp = next_node;
+  }
+
+  clear_watch_list();
+
+  if (abort_txn)
+  {
+    strcpy(output_buf, "*-1\r\n");
+    return;
+  }
+
 	is_multi = 0;
 	char exec_output_buf[BUF_SIZE];
 	int buf_offset = snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", trans_queue_cnt);
@@ -605,17 +768,25 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 		char *query = trans_queue[trans_idx] + 1;
 		char *saveptr;  // Save pointer for the outer tokenization
 		int query_cnt = atoi(strtok_r(query, "\r\n", &saveptr));
-		char *tokens[10];
+    char* tokens[10] = { 0 };
 
 		for (int i = 0; i < query_cnt; ++i)
 		{
 			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
 			char *token = strtok_r(NULL, "\r\n", &saveptr);
+      if (!token) {
+        buf_offset += snprintf(exec_output_buf + buf_offset, BUF_SIZE - buf_offset, "-ERR malformed command\r\n");
+        goto next_cmd;   // need to skip to outer loop's next iteration
+      }
 			tokens[i] = token;
+      printf("tok[%d]: %s\n",i, tokens[i]);
 		}
+
 		char *command = tokens[0];
 		for (char *c = command; *c; ++c)
 			*c = toupper(*c);
+
+    printf("query_cnt: %d\n", query_cnt);
 
 		if (strncmp(command, "SET", strlen("SET")) == 0)
 			handle_set_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
@@ -628,6 +799,7 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 		free(trans_queue[trans_idx]);
 	}
 	strcpy(output_buf, exec_output_buf);
+  next_cmd:;
 }
 
 void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int stream_count)
@@ -1081,6 +1253,12 @@ void *handle_client(void *arg)
       continue;
     }
 
+    if (strcmp(command, "COMMAND") == 0)
+    {
+      write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
+      continue;
+    }
+
 		if (strncmp(command, "PING", strlen("PING")) == 0)
 		{
 			snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
@@ -1092,6 +1270,10 @@ void *handle_client(void *arg)
 		else if (strncmp(command, "SET", strlen("SET")) == 0)
 		{
 			handle_set_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);
+      Watched* tmp = get_watched(tokens[1]);
+      if (tmp)
+        tmp->socket = client_sock;
+      
 		}
 		else if (strncmp(command, "GET", strlen("GET")) == 0)
 		{
@@ -1389,7 +1571,7 @@ void *handle_client(void *arg)
 
 		else if (strncmp(command, "EXEC", strlen("EXEC")) == 0)
 		{
-			handle_exec_command(output_buf, is_multi, trans_queue, trans_queue_cnt);
+      handle_exec_command(output_buf, is_multi, trans_queue, trans_queue_cnt, client_sock);
 			is_multi = 0;
 			trans_queue_cnt = 0;
 		}
@@ -1400,6 +1582,7 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "-ERR DISCARD without MULTI\r\n");
 			is_multi = 0;
 			trans_queue_cnt = 0;
+      clear_watch_list();
 		}
 		else if (strncmp(command, "RPUSH", strlen("RPUSH")) == 0)
 		{
@@ -1872,9 +2055,17 @@ void *handle_client(void *arg)
       if (is_multi)
         strcpy(output_buf, "-ERR WATCH inside MULTI is not allowed\r\n");
       else
+      {
+        for (int i = 1; i < query_cnt; ++i)
+          push_watched(&watch_head, tokens[i], client_sock);
         strcpy(output_buf, "+OK\r\n");
+      }
     }
-		
+    else if (strncmp(command, "UNWATCH", strlen("UNWATCH")) == 0)
+    {
+      clear_watch_list();
+      strcpy(output_buf, "+OK\r\n");
+    }
 
 		write(client_sock, output_buf, strlen(output_buf));
 	}
@@ -1884,6 +2075,8 @@ void *handle_client(void *arg)
 }
 
 int main(int argc, char *argv[]) {
+
+  setup_crash_handler();
 	// Disable output buffering
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);

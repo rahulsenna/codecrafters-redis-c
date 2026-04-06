@@ -55,7 +55,7 @@
                 "test_all_with_redis"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/../tester-redis"
+                "cwd": "${workspaceFolder}/../tester"
             },
             "problemMatcher": [],
             "group": {

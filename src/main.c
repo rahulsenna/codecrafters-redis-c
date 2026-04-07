@@ -18,71 +18,44 @@
 
 
 #include <signal.h>
-#include <execinfo.h>  // for backtrace (Linux/glibc)
+#include <execinfo.h>
+void crash_handler(int signum)
+{
+  void* bt[32];
+  int size = backtrace(bt, 32);
+  char** syms = backtrace_symbols(bt, size);
 
-#if 0
-void crash_handler(int signum) {
-  // Get a stack trace
-  void *bt[32];
-  int bt_size = backtrace(bt, 32);
-  char **bt_syms = backtrace_symbols(bt, bt_size);
+  fprintf(stderr, "=== CRASH (signal %d) ===\n", signum);
 
-  fprintf(stderr, "\n=== CRASH DETECTED (signal %d) ===\n", signum);
+  char cmd[512];
+  for (int i = 0; i < size; i++)
+  {
+    fprintf(stderr, "%s\n", syms[i]);
 
-  if (bt_syms) {
-    for (int i = 0; i < bt_size; i++) {
-      fprintf(stderr, "  [%d] %s\n", i, bt_syms[i]);
-    }
-    free(bt_syms);
+    snprintf(cmd, sizeof(cmd),
+      "addr2line -e /proc/%d/exe -f -i -p %p 1>&2", getpid(), bt[i]);
+    system(cmd);
   }
 
-  fprintf(stderr, "=================================\n");
-  fflush(stderr);
-
-  // Re-raise so the OS records the crash properly (core dump, etc.)
+  free(syms);
   signal(signum, SIG_DFL);
   raise(signum);
 }
-#endif
 
-void crash_handler(int signum) {
-    void *bt[32];
-    int size = backtrace(bt, 32);
-    char **syms = backtrace_symbols(bt, size);
-
-    fprintf(stderr, "=== CRASH (signal %d) ===\n", signum);
-
-    char cmd[512];
-    for (int i = 0; i < size; i++) {
-        // Print the raw symbol line
-        fprintf(stderr, "%s\n", syms[i]);
-
-        // Resolve file:line via addr2line
-        snprintf(cmd, sizeof(cmd),
-            "addr2line -e /proc/%d/exe -f -i -p %p 1>&2", getpid(), bt[i]);
-        system(cmd);  // unsafe but fine — process is dying anyway
-    }
-
-    free(syms);
-    signal(signum, SIG_DFL);
-    raise(signum);
-}
-
-// Call this at the top of main()
-void setup_crash_handler(void) {
+void setup_crash_handler(void)
+{
   struct sigaction sa;
   sa.sa_handler = crash_handler;
   sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_RESETHAND;  // restore default after first signal
+  sa.sa_flags = SA_RESETHAND;
 
   sigaction(SIGSEGV, &sa, NULL);  // segfault
   sigaction(SIGABRT, &sa, NULL);  // abort() / assert()
-  sigaction(SIGFPE,  &sa, NULL);  // divide by zero
-  sigaction(SIGBUS,  &sa, NULL);  // misaligned memory
-  sigaction(SIGILL,  &sa, NULL);  // illegal instruction
-
-
+  sigaction(SIGFPE, &sa, NULL);  // divide by zero
+  sigaction(SIGBUS, &sa, NULL);  // misaligned memory
+  sigaction(SIGILL, &sa, NULL);  // illegal instruction
 }
+
 uint64_t get_curr_time(void) 
 {
     struct timeval tv;
@@ -774,19 +747,12 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 		{
 			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
 			char *token = strtok_r(NULL, "\r\n", &saveptr);
-      if (!token) {
-        buf_offset += snprintf(exec_output_buf + buf_offset, BUF_SIZE - buf_offset, "-ERR malformed command\r\n");
-        goto next_cmd;   // need to skip to outer loop's next iteration
-      }
 			tokens[i] = token;
-      printf("tok[%d]: %s\n",i, tokens[i]);
 		}
 
 		char *command = tokens[0];
 		for (char *c = command; *c; ++c)
 			*c = toupper(*c);
-
-    printf("query_cnt: %d\n", query_cnt);
 
 		if (strncmp(command, "SET", strlen("SET")) == 0)
 			handle_set_command(output_buf, req_buf2, tokens, is_multi, trans_queue, &trans_queue_cnt);

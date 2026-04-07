@@ -6,17 +6,9 @@
         {
             "type": "cppbuild",
             "label": "build_server",
-            "command": "gcc",
+            "command": "cmake",
             "args": [
-                // "-fcolor-diagnostics",
-                // "-fansi-escape-codes",
-                "-g",
-                "-Wno-format",
-                // "-fsanitize=address",
-                "${workspaceFolder}/app/server.c",
-                "-o",
-                "${workspaceFolder}/bin/codecrafters-build-redis-c",
-                "-lm"
+                "--build", "./build"
             ],
             "presentation": {
                 "echo": true,

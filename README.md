@@ -47,17 +47,6 @@ Or telnet for basic testing:
 telnet localhost 6379
 ```
 
-## Project Structure
-
-```
-.
-├── app/
-│   └── server.c          # Main Redis server implementation
-├── codecrafters.yml      # CodeCrafters configuration
-├── README.md            # This file
-└── your_program.sh      # Build and run script
-```
-
 ## Supported Commands
 
 ### Basic Commands

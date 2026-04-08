@@ -16,6 +16,16 @@
 #include <stdint.h>
 #include "sha256.h"
 
+#define STB_DS_IMPLEMENTATION
+#include "stb_ds.h"
+
+typedef struct ConfigMap
+{
+  char* key;
+  char* value;
+} ConfigMap;
+
+ConfigMap* config = NULL;
 
 #include <signal.h>
 #include <execinfo.h>
@@ -295,16 +305,6 @@ void hashmap_free(HashMap* map) {
     }
     free(map);
 }
-
-typedef enum 
-{
-	ArgDirName = 0x0,
-	ArgFileName,
-	ArgReplicationHost,
-	ArgCount,
-} ArgType;
-
-char *config[ArgCount] = {0};
 
 int read_rdb_file(char *redis_file_path, HashMap* map, char *keys[100])
 {
@@ -1253,13 +1253,11 @@ void *handle_client(void *arg)
 		else if (strncmp(command, "CONFIG", strlen("CONFIG")) == 0)
 		{
 			if (strncmp(tokens[1], "GET", strlen("GET")) == 0)
-			{
-				if (strncmp(tokens[2], "dir", strlen("dir")) == 0)
-				{
-					snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
-							 strlen("dir"), "dir",
-							 strlen(config[ArgDirName]), config[ArgDirName]);
-				}
+			{  
+        char *get_opt = shget(config, tokens[2]);
+        snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
+          strlen(tokens[2]), tokens[2],
+          strlen(get_opt), get_opt);
 			}
 		}
 		else if (strncmp(command, "KEYS", strlen("KEYS")) == 0)
@@ -2048,19 +2046,22 @@ int main(int argc, char *argv[]) {
 	setbuf(stderr, NULL);
 	pthread_mutex_init(&lpop_mutex, NULL);
 
-	for (int i = 0; i < ArgCount; ++i)
-	{
-		config[i] = 0;
-	}
 
 	port = 6379;
 	replication_port = 0;
+
+  char cwd[PATH_MAX];
+  getcwd(cwd, sizeof(cwd));
+  shput(config, "dir", cwd);
+  shput(config, "appendonly", "no");
+  shput(config, "appenddirname", "appendonlydir");
+  shput(config, "appendfilename", "appendonly.aof");
 
 	for (int i = 1; i < argc; i+=2)
 	{
 		if (strncmp(argv[i], "--replicaof", strlen("--replicaof")) == 0)
 		{
-			config[ArgReplicationHost] = argv[i + 1];
+      shput(config, "replicaof", argv[i + 1]);
 			sscanf(argv[i + 1], "%*s %d", &replication_port);
 		}
 		if (strncmp(argv[i], "--port", strlen("--port")) == 0)
@@ -2069,17 +2070,17 @@ int main(int argc, char *argv[]) {
 		}
 		if (strncmp(argv[i], "--dir", strlen("--dir")) == 0)
 		{
-			config[ArgDirName] = argv[i+1];
+      shput(config, "dir", argv[i + 1]);
 		}
 
 		if (strncmp(argv[i], "--dbfilename", strlen("--dbfilename")) == 0)
 		{
-			config[ArgFileName] = argv[i+1];
+      shput(config, "dbfilename", argv[i + 1]);
 		}
 	}
 
-	DEBUG("Config[ArgDirName]: %s\n", config[ArgDirName]);
-	DEBUG("Config[ArgFileName]: %s\n", config[ArgFileName]);
+	DEBUG("Config[ArgDirName]: %s\n", shget(config, "dir"));
+	DEBUG("Config[ArgFileName]: %s\n", shget(config, "dbfilename"));
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	DEBUG("Logs from your program will appear here!\n");
 
@@ -2134,7 +2135,7 @@ int main(int argc, char *argv[]) {
 
 
 	char redis_file_path[1024];
-	snprintf(redis_file_path, sizeof(redis_file_path), "%s/%s", config[ArgDirName], config[ArgFileName]);
+	snprintf(redis_file_path, sizeof(redis_file_path), "%s/%s", shget(config, "dir"), shget(config, "dbfilename"));
 	
 
 	db_map_size = read_rdb_file(redis_file_path, map, keys);

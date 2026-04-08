@@ -47,7 +47,8 @@
                 "test_all_with_redis"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/../tester"
+                // "cwd": "${workspaceFolder}/../tester"
+                "cwd": "/home/agent/codecrafter/redis/tester"
             },
             "problemMatcher": [],
             "group": {

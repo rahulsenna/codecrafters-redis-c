@@ -16,6 +16,9 @@
 #include <stdint.h>
 #include "sha256.h"
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
@@ -2071,6 +2074,7 @@ int main(int argc, char *argv[]) {
 		if (strncmp(argv[i], "--dir", strlen("--dir")) == 0)
 		{
       shput(config, "dir", argv[i + 1]);
+      mkdir((char*) argv[i + 1], 0755);
 		}
 
 		if (strncmp(argv[i], "--dbfilename", strlen("--dbfilename")) == 0)
@@ -2084,10 +2088,26 @@ int main(int argc, char *argv[]) {
     if (strncmp(argv[i], "--appenddirname", strlen("--appenddirname")) == 0)
 		{
       shput(config, "appenddirname", argv[i + 1]);
+      snprintf(cwd, PATH_MAX, "%s/%s", shget(config, "dir"), argv[i + 1]);
+      mkdir((char*) cwd, 0755);
 		}
     if (strncmp(argv[i], "--appendfilename", strlen("--appendfilename")) == 0)
 		{
       shput(config, "appendfilename", argv[i + 1]);
+      char full_append_path[PATH_MAX];
+      snprintf(full_append_path, PATH_MAX, "%s/%s.1.incr.aof", cwd, argv[i + 1]);
+      FILE* fp = fopen(full_append_path, "a");
+      if (fp != NULL)
+        fclose(fp);
+      snprintf(full_append_path, PATH_MAX, "%s/%s.manifest", cwd, argv[i + 1]);
+
+      char filename[256];
+      snprintf(filename, sizeof(filename), "file %s.1.incr.aof seq 1 type i", argv[i + 1]);
+      
+      fp = fopen(full_append_path, "wb");
+      fwrite(filename, sizeof(char), strlen(filename), fp);
+      if (fp != NULL)
+        fclose(fp);
 		}
 	}
 

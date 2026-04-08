@@ -2077,6 +2077,18 @@ int main(int argc, char *argv[]) {
 		{
       shput(config, "dbfilename", argv[i + 1]);
 		}
+    if (strncmp(argv[i], "--appendonly", strlen("--appendonly")) == 0)
+		{
+      shput(config, "appendonly", argv[i + 1]);
+		}
+    if (strncmp(argv[i], "--appenddirname", strlen("--appenddirname")) == 0)
+		{
+      shput(config, "appenddirname", argv[i + 1]);
+		}
+    if (strncmp(argv[i], "--appendfilename", strlen("--appendfilename")) == 0)
+		{
+      shput(config, "appendfilename", argv[i + 1]);
+		}
 	}
 
 	DEBUG("Config[ArgDirName]: %s\n", shget(config, "dir"));

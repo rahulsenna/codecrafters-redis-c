@@ -813,7 +813,7 @@ void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int strea
 
 			buf_offet += snprintf(output_buf+buf_offet, BUF_SIZE, "*2\r\n$%lu\r\n%s\r\n", strlen(stream_key), stream_key);
 
-			sscanf(IDs[i], "%llu-%d", &entry_time, &entry_seq);
+			sscanf(IDs[i], "%lu-%d", &entry_time, &entry_seq);
 			if (only_new_entries == 1)
 			{
 				entry_seq = INT_MAX;
@@ -1418,9 +1418,9 @@ void *handle_client(void *arg)
 			}
 			else
 			{
-				sscanf(ID, "%llu-%d", &ms_time, &sequence_num);
+				sscanf(ID, "%lu-%d", &ms_time, &sequence_num);
 				char sequence_char;
-				sscanf(ID, "%*llu-%c", &sequence_char);
+				sscanf(ID, "%*u-%c", &sequence_char);
 				if (sequence_char == '*')
 					sequence_num = -1;
 			}
@@ -1441,9 +1441,9 @@ void *handle_client(void *arg)
 					sequence_num = (ms_time ? 0 : 1);
 				
 				snprintf(stream_str, sizeof(stream_str),
-								 "%llu-%d %s:%s\n", ms_time, sequence_num, stream_key, stream_val);
+								 "%lu-%d %s:%s\n", ms_time, sequence_num, stream_key, stream_val);
 				char new_id[256];
-				snprintf(new_id, sizeof(new_id),"%llu-%d", ms_time, sequence_num);
+				snprintf(new_id, sizeof(new_id),"%lu-%d", ms_time, sequence_num);
 				
 				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);	
 				hashmap_put(map, entry_key, stream_str, UINT64_MAX, TypeStream);
@@ -1464,7 +1464,7 @@ void *handle_client(void *arg)
 			{
 				uint64_t last_ms_time;
 				int last_sequence_num;
-				sscanf(val->value, "%llu-%d", &last_ms_time, &last_sequence_num);
+				sscanf(val->value, "%lu-%d", &last_ms_time, &last_sequence_num);
 
 				if (sequence_num == -1)
 				{
@@ -1475,12 +1475,12 @@ void *handle_client(void *arg)
 				}
 				
 				snprintf(stream_str, sizeof(stream_str),
-					"%llu-%d %s:%s\n", ms_time, sequence_num, stream_key, stream_val);
+					"%lu-%d %s:%s\n", ms_time, sequence_num, stream_key, stream_val);
 
 				if (ms_time > last_ms_time || (ms_time == last_ms_time && sequence_num > last_sequence_num))
 				{
 					char new_id[256];
-					snprintf(new_id, sizeof(new_id),"%llu-%d", ms_time, sequence_num);
+					snprintf(new_id, sizeof(new_id),"%lu-%d", ms_time, sequence_num);
 
 					snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(new_id), new_id);
 					if (val->value)
@@ -1517,9 +1517,9 @@ void *handle_client(void *arg)
 			uint64_t start_time = 0, end_time;
       int start_seq = 0, end_seq = INT_MAX;
       if (strncmp(tokens[2], "-", strlen("-")) != 0)
-        sscanf(tokens[2], "%llu-%d", &start_time, &start_seq);
+        sscanf(tokens[2], "%lu-%d", &start_time, &start_seq);
 			
-			sscanf(tokens[3], "%llu-%d", &end_time, &end_seq);
+			sscanf(tokens[3], "%lu-%d", &end_time, &end_seq);
 			
 			char temp_buff[1024];
 			int offset = 0;
@@ -1998,7 +1998,7 @@ void *handle_client(void *arg)
         snprintf(username, sizeof(username), "userid:%s", tokens[2]);
         char* pass = hashmap_get(map, username);
         if (pass)
-          snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*0\r\n$9\r\npasswords\r\n*1\r\n$%d\r\n%s\r\n", strlen(pass), pass);
+          snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*0\r\n$9\r\npasswords\r\n*1\r\n$%ld\r\n%s\r\n", strlen(pass), pass);
         else
           snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n");
       } else if (strncmp(tokens[1], "SETUSER", strlen("SETUSER")) == 0)
@@ -2128,7 +2128,7 @@ int main(int argc, char *argv[]) {
           char play_file_path[PATH_MAX];
           snprintf(play_file_path, sizeof(play_file_path), "%s/%s", cwd, play_file_name);
           int fd = open(play_file_path, O_RDONLY);
-          int* fake_client_sock = memcpy(malloc(sizeof(int)), &(int) { fd }, sizeof(int));
+          int* fake_client_sock = (int*) memcpy(malloc(sizeof(int)), (int[]) { fd }, sizeof(int));
           handle_client(fake_client_sock);
         }
         fclose(manifest_f);

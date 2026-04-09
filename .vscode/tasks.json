@@ -19,7 +19,7 @@
                 "clear": true
             },
             "options": {
-                "cwd": "${workspaceFolder}/bin"
+                "cwd": "${workspaceFolder}"
             },
             "problemMatcher": [
                 "$gcc"

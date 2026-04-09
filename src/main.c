@@ -1181,28 +1181,32 @@ void *handle_client(void *arg)
     char req_buf[1024];
     char req_buf2[1024];
     char output_buf[1024];
-  ssize_t bytes_read;
+
 	int is_multi = 0;
 	char *trans_queue[100];
 	int trans_queue_cnt = 0;
-	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
-	{
-    if (bytes_read == -1)
-      break;
-    req_buf[bytes_read] = 0;
-		memcpy(req_buf2, req_buf, 1024);
-		char *query = req_buf + 1;
-		char *saveptr;  // Save pointer for the outer tokenization
-		int query_cnt = atoi(strtok_r(query, "\r\n", &saveptr));
-		char *tokens[10];
+
+  int query_cnt;
+  
+  char* tokens[10];
+  FILE* client_stream = fdopen(client_sock, "r+");
+  if (!client_stream) return 0;
+  while (fscanf(client_stream, "*%d\r\n", &query_cnt) == 1)
+  {
+    size_t req_buf_i = snprintf(req_buf2, BUF_SIZE, "*%d\r\n", query_cnt);
     DEBUG("PORT: %d ", port);
-		for (int i = 0; i < query_cnt; ++i)
-		{
-			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
-			char *token = strtok_r(NULL, "\r\n", &saveptr);
-			tokens[i] = token;
-			DEBUG("tok%d: %s | ", i, tokens[i]);
-		}
+    for (int i = 0; i < query_cnt; ++i)
+    {
+      int char_cnt;
+      fscanf(client_stream, "$%d\r\n", &char_cnt);
+      tokens[i] = (char*) malloc((char_cnt + 1) * sizeof(char));
+      fread(tokens[i], sizeof(char), char_cnt, client_stream);
+      tokens[i][char_cnt] = 0;
+      fgetc(client_stream); // skip \r
+      fgetc(client_stream); // skip \n
+      req_buf_i += snprintf(req_buf2 + req_buf_i, BUF_SIZE, "$%d\r\n%s\r\n", char_cnt, tokens[i]);
+      DEBUG("tok%d: %s | ", i, tokens[i]);
+    }
 		DEBUG("\n");
 
 		char *command = tokens[0];
@@ -2058,7 +2062,7 @@ void *handle_client(void *arg)
 
 int main(int argc, char *argv[]) {
 
-  // setup_crash_handler();
+  setup_crash_handler();
 	// Disable output buffering
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
@@ -2127,7 +2131,7 @@ int main(int argc, char *argv[]) {
         {
           char play_file_path[PATH_MAX];
           snprintf(play_file_path, sizeof(play_file_path), "%s/%s", cwd, play_file_name);
-          int fd = open(play_file_path, O_RDONLY);
+          int fd = open(play_file_path, O_RDWR);
           int* fake_client_sock = (int*) memcpy(malloc(sizeof(int)), (int[]) { fd }, sizeof(int));
           handle_client(fake_client_sock);
         }

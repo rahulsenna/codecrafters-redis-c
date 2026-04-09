@@ -1181,12 +1181,14 @@ void *handle_client(void *arg)
     char req_buf[1024];
     char req_buf2[1024];
     char output_buf[1024];
-    size_t bytes_read;
+  ssize_t bytes_read;
 	int is_multi = 0;
 	char *trans_queue[100];
 	int trans_queue_cnt = 0;
 	while((bytes_read = read(client_sock, req_buf, sizeof(req_buf))))
 	{
+    if (bytes_read == -1)
+      break;
     req_buf[bytes_read] = 0;
 		memcpy(req_buf2, req_buf, 1024);
 		char *query = req_buf + 1;
@@ -2056,12 +2058,13 @@ void *handle_client(void *arg)
 
 int main(int argc, char *argv[]) {
 
-  setup_crash_handler();
+  // setup_crash_handler();
 	// Disable output buffering
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
 	pthread_mutex_init(&lpop_mutex, NULL);
 
+	map = hashmap_create();
 
 	port = 6379;
 	replication_port = 0;
@@ -2116,6 +2119,21 @@ int main(int argc, char *argv[]) {
       char manifest_path[PATH_MAX];
       snprintf(manifest_path, PATH_MAX, "%s/%s.manifest", cwd, argv[i + 1]);
 
+      FILE* manifest_f = fopen(manifest_path, "r");
+      if (manifest_f)
+      {
+        char play_file_name[PATH_MAX];
+        if (fscanf(manifest_f, "%*s %255s", play_file_name))
+        {
+          char play_file_path[PATH_MAX];
+          snprintf(play_file_path, sizeof(play_file_path), "%s/%s", cwd, play_file_name);
+          int fd = open(play_file_path, O_RDONLY);
+          int* fake_client_sock = memcpy(malloc(sizeof(int)), &(int) { fd }, sizeof(int));
+          handle_client(fake_client_sock);
+        }
+        fclose(manifest_f);
+      }
+
       char filename[256];
       snprintf(filename, sizeof(filename), "file %s.1.incr.aof seq 1 type i", argv[i + 1]);
       
@@ -2131,7 +2149,6 @@ int main(int argc, char *argv[]) {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	DEBUG("Logs from your program will appear here!\n");
 
-	map = hashmap_create();
 
 	int server_fd;
 	struct sockaddr_in client_addr;

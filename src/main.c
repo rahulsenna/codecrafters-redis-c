@@ -1165,6 +1165,10 @@ double get_distance(coordinates_t coord_a, coordinates_t coord_b)
 	return EARTH_RADIUS_IN_METERS * c;
 }
 
+int append_idx = 1;
+int append_only = 0;
+char full_append_path[PATH_MAX];
+
 void *handle_client(void *arg)
 {
   int authenticated = 0;
@@ -1202,6 +1206,15 @@ void *handle_client(void *arg)
 		char *command = tokens[0];
 		for (char *c = command; *c; ++c)
 			*c = toupper(*c);
+
+    if (append_only &&
+      (strcmp(command, "GET") != 0) &&
+      (strcmp(command, "ECHO") != 0))
+    {
+      FILE* fp = fopen(full_append_path, "a");
+      fprintf(fp, "%s", req_buf2);
+      fclose(fp);
+    }
 
 
     if (subscribe_mode &&
@@ -2093,18 +2106,20 @@ int main(int argc, char *argv[]) {
 		}
     if (strncmp(argv[i], "--appendfilename", strlen("--appendfilename")) == 0)
 		{
+      append_only = 1;
       shput(config, "appendfilename", argv[i + 1]);
-      char full_append_path[PATH_MAX];
       snprintf(full_append_path, PATH_MAX, "%s/%s.1.incr.aof", cwd, argv[i + 1]);
       FILE* fp = fopen(full_append_path, "a");
       if (fp != NULL)
         fclose(fp);
-      snprintf(full_append_path, PATH_MAX, "%s/%s.manifest", cwd, argv[i + 1]);
+
+      char manifest_path[PATH_MAX];
+      snprintf(manifest_path, PATH_MAX, "%s/%s.manifest", cwd, argv[i + 1]);
 
       char filename[256];
       snprintf(filename, sizeof(filename), "file %s.1.incr.aof seq 1 type i", argv[i + 1]);
       
-      fp = fopen(full_append_path, "wb");
+      fp = fopen(manifest_path, "wb");
       fwrite(filename, sizeof(char), strlen(filename), fp);
       if (fp != NULL)
         fclose(fp);

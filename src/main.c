@@ -1172,15 +1172,13 @@ char full_append_path[PATH_MAX];
 void *handle_client(void *arg)
 {
   int authenticated = 0;
-	int subscribe_mode = 0;
-	int client_sock = *(int *)arg;
-    free(arg);
-    DEBUG("Client connected - port: %d - client_sock: %d\n", port, client_sock);
+  int subscribe_mode = 0;
+  int client_sock = *(int*) arg;
+  free(arg);
+  DEBUG("Client connected - port: %d - client_sock: %d\n", port, client_sock);
 
-
-    char req_buf[1024];
-    char req_buf2[1024];
-    char output_buf[1024];
+  char req_buf2[BUF_SIZE];
+  char output_buf[BUF_SIZE * 2];
 
 	int is_multi = 0;
 	char *trans_queue[100];
@@ -2073,12 +2071,12 @@ int main(int argc, char *argv[]) {
 	port = 6379;
 	replication_port = 0;
 
-  char cwd[PATH_MAX];
+  char cwd[PATH_MAX / 2];
   getcwd(cwd, sizeof(cwd));
   shput(config, "dir", cwd);
-  shput(config, "appendonly", "no");
-  shput(config, "appenddirname", "appendonlydir");
-  shput(config, "appendfilename", "appendonly.aof");
+  shput(config, "appendonly", (char*) "no");
+  shput(config, "appenddirname", (char*) "appendonlydir");
+  shput(config, "appendfilename", (char*) "appendonly.aof");
 
 	for (int i = 1; i < argc; i+=2)
 	{
@@ -2126,7 +2124,7 @@ int main(int argc, char *argv[]) {
       FILE* manifest_f = fopen(manifest_path, "r");
       if (manifest_f)
       {
-        char play_file_name[PATH_MAX];
+        char play_file_name[PATH_MAX / 4];
         if (fscanf(manifest_f, "%*s %255s", play_file_name))
         {
           char play_file_path[PATH_MAX];

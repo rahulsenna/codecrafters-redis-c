@@ -38,7 +38,7 @@ static inline String _str_view(const char* cstr, size_t n)
 
 static inline String _str_cpy(const char* cstr, size_t n)
 {
-  String out;
+  String out = { 0 };
   out.len = n;
   if (n <= SSO_MAX)
   {
@@ -56,6 +56,24 @@ static inline String _str_cpy(const char* cstr, size_t n)
   return out;
 }
 
+static inline String str_init_len(size_t n)
+{
+  String out = { 0 };
+  out.len = n;
+  if (n <= SSO_MAX)
+  {
+    out.kind = STR_KIND_SSO;
+    out.buf[n] = '\0';
+    return out;
+  }
+
+  out.kind = STR_KIND_HEAP;
+  out.cap = n + 1;
+  out.ptr = (char*) malloc(n + 1);
+  out.ptr[n] = '\0';
+  return out;
+}
+
 #define STR_IS_SSO(s)   ((s).kind == STR_KIND_SSO)
 #define STR_IS_VIEW(s)  ((s).kind == STR_KIND_VIEW)
 #define STR_IS_HEAP(s)  ((s).kind == STR_KIND_HEAP)
@@ -64,6 +82,8 @@ static inline char* str_data(String* s)
 {
   return s->kind == STR_KIND_SSO ? s->buf : s->ptr;
 }
+#define STR_DATA(s) (str_data(&s))
+
 #define STR_FREE(s)                     \
     do {                                \
         if (!STR_IS_SSO(s) &&           \

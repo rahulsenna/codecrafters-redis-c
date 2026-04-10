@@ -30,6 +30,15 @@ typedef struct ConfigMap
 
 ConfigMap* config = NULL;
 
+#include "String.h"
+
+#define MAX_TOKEN_COUNT 16
+typedef struct Resp
+{
+  String tokens[MAX_TOKEN_COUNT];
+  size_t len;
+} Resp;
+
 #include <signal.h>
 #include <execinfo.h>
 
@@ -623,9 +632,9 @@ int did_propogate_to_replica = 0;
 
 #define BUF_SIZE 1024
 
-void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[10])
+void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
 {
-	Entry *val = hashmap_get_entry(map, tokens[1]);
+	Entry *val = hashmap_get_entry(map, STR_DATA(cmd->tokens[1]));
 
 	if (val && val->expiry > get_curr_time())
 	{
@@ -635,18 +644,18 @@ void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[
 		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
 }
 
-void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[10])
+void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
 {
 	uint64_t expiry_time = UINT64_MAX;
 	
 
-	if (tokens[3] && (strncmp(tokens[3], "px", 2) == 0 || strncmp(tokens[3], "PX", 2) == 0))
+	if (cmd->len > 3 && (c_str_eq(cmd->tokens[3], "px") || c_str_eq(cmd->tokens[3], "PX")))
 	{
 		uint64_t curr_time = get_curr_time();
-		expiry_time = curr_time + atoll(tokens[4]);
+		expiry_time = curr_time + atoll(STR_DATA(cmd->tokens[4]));
 	}
 
-	hashmap_put(map, tokens[1], tokens[2], expiry_time, TypeString);
+	hashmap_put(map, STR_DATA(cmd->tokens[1]), STR_DATA(cmd->tokens[2]), expiry_time, TypeString);
 	snprintf(output_buf, BUF_SIZE, "+OK\r\n");
 
 	did_propogate_to_replica = replica_socks_cnt;
@@ -656,9 +665,9 @@ void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[
 	}
 }
 
-void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens[10])
+void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
 {	
-	Entry *val = hashmap_get_entry(map, tokens[1]);
+	Entry *val = hashmap_get_entry(map, STR_DATA(cmd->tokens[1]));
 
 	if (val)
 	{
@@ -678,7 +687,7 @@ void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, char *tokens
 		}
 	} else
 	{
-		hashmap_put(map, tokens[1], "1", UINT64_MAX, TypeString);
+		hashmap_put(map, STR_DATA(cmd->tokens[1]), "1", UINT64_MAX, TypeString);
 		snprintf(output_buf, BUF_SIZE, ":1\r\n");
 	}
 }
@@ -724,31 +733,35 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
 	int buf_offset = snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", trans_queue_cnt);
 	for (int trans_idx = 0; trans_idx < trans_queue_cnt; ++trans_idx)
 	{
+    Resp cmd = { 0 };
 		char req_buf2[BUF_SIZE];
 		memcpy(req_buf2, trans_queue[trans_idx], BUF_SIZE);
 
-		char *query = trans_queue[trans_idx] + 1;
-		char *saveptr;  // Save pointer for the outer tokenization
-		int query_cnt = atoi(strtok_r(query, "\r\n", &saveptr));
-    char* tokens[10] = { 0 };
+    char* ptr = trans_queue[trans_idx];
+    int offset;
+    sscanf(ptr, "*%d\r\n%n", &cmd.len, &offset);
+    ptr += offset;
+    for (int i = 0; i < cmd.len; ++i)
+    {
+      int char_cnt;
+      sscanf(ptr, "$%d\r\n%n", &char_cnt, &offset);
+      ptr += offset;
+      
+      cmd.tokens[i] = _str_cpy(ptr, char_cnt);
+      STR_DATA(cmd.tokens[i])[char_cnt] = 0;
+      ptr += char_cnt + 2; // + /r/n
+    }
 
-		for (int i = 0; i < query_cnt; ++i)
-		{
-			char *chr_cnt = strtok_r(NULL, "\r\n", &saveptr);
-			char *token = strtok_r(NULL, "\r\n", &saveptr);
-			tokens[i] = token;
-		}
-
-		char *command = tokens[0];
-		for (char *c = command; *c; ++c)
+		String command = cmd.tokens[0];
+		for (char *c = STR_DATA(command); *c; ++c)
 			*c = toupper(*c);
 
-		if (strncmp(command, "SET", strlen("SET")) == 0)
-			handle_set_command(output_buf, req_buf2, tokens);
-		else if (strncmp(command, "INCR", strlen("INCR")) == 0)
-			handle_incr_command(output_buf, req_buf2, tokens);
-		else if (strncmp(command, "GET", strlen("GET")) == 0)
-			handle_get_command(output_buf, req_buf2, tokens);
+		if (c_str_eq(command, "SET"))
+			handle_set_command(output_buf, req_buf2, &cmd);
+		else if (c_str_eq(command, "INCR"))
+			handle_incr_command(output_buf, req_buf2, &cmd);
+		else if (c_str_eq(command, "GET"))
+			handle_get_command(output_buf, req_buf2, &cmd);
 		
 		buf_offset += snprintf(exec_output_buf+buf_offset, BUF_SIZE, "%s", output_buf);
 		free(trans_queue[trans_idx]);
@@ -757,32 +770,32 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
   next_cmd:;
 }
 
-void handle_xread_command(char output_buf[BUF_SIZE], char *tokens[10], int stream_count)
+void handle_xread_command(char output_buf[BUF_SIZE], Resp *cmd, int stream_count)
 {
 	char *stream_keys[100];
 	char *IDs[100];
 	int token_idx = 2;
 	int blocking = 0;
 	useconds_t block_ms;
-	if ((strncmp(tokens[1], "block", strlen("block")) == 0))
+	if (c_str_eq(cmd->tokens[1], "block"))
 	{
 		blocking = 1;
 		stream_count -= 1;
 		token_idx = 4;
 
-		sscanf(tokens[2], "%u", &block_ms);
+		sscanf(STR_DATA(cmd->tokens[2]), "%u", &block_ms);
 		block_ms *= 1000;
 		usleep(block_ms);
 	}
 
 	for (int i = 0; i < stream_count; ++i)
-		stream_keys[i] = tokens[token_idx++];
+		stream_keys[i] = STR_DATA(cmd->tokens[token_idx++]);
 
 	for (int i = 0; i < stream_count; ++i)
-		IDs[i] = tokens[token_idx++];
+		IDs[i] = STR_DATA(cmd->tokens[token_idx++]);
 
 	int only_new_entries = 0;
-	if (tokens[5] && strcmp(tokens[5], "$") == 0)
+  if (cmd->len > 5 && c_str_eq(cmd->tokens[5], "$"))
 		only_new_entries = 1;
 
 	int things_added = 0;
@@ -1169,37 +1182,30 @@ void *handle_client(void *arg)
   int in_transaction = 0;
   char* transactions[100];
   int transaction_count = 0;
-
-  int query_cnt;
   
-  char* tokens[10];
+  Resp cmd = { 0 };
   FILE* client_stream = fdopen(client_sock, "r+");
   if (!client_stream) return 0;
-  while (fscanf(client_stream, "*%d\r\n", &query_cnt) == 1)
+  while (fscanf(client_stream, "*%d\r\n", &cmd.len) == 1)
   {
-    size_t req_buf_i = snprintf(req_buf2, BUF_SIZE, "*%d\r\n", query_cnt);
-    DEBUG("PORT: %d ", port);
-    for (int i = 0; i < query_cnt; ++i)
+    size_t req_buf_i = snprintf(req_buf2, BUF_SIZE, "*%d\r\n", cmd.len);
+    for (int i = 0; i < cmd.len; ++i)
     {
       int char_cnt;
       fscanf(client_stream, "$%d\r\n", &char_cnt);
-      tokens[i] = (char*) malloc((char_cnt + 1) * sizeof(char));
-      fread(tokens[i], sizeof(char), char_cnt, client_stream);
-      tokens[i][char_cnt] = 0;
-      fgetc(client_stream); // skip \r
-      fgetc(client_stream); // skip \n
-      req_buf_i += snprintf(req_buf2 + req_buf_i, BUF_SIZE, "$%d\r\n%s\r\n", char_cnt, tokens[i]);
-      DEBUG("tok%d: %s | ", i, tokens[i]);
+      cmd.tokens[i] = str_init_len(char_cnt);
+      fread(STR_DATA(cmd.tokens[i]), sizeof(char), char_cnt, client_stream);
+      fgetc(client_stream); fgetc(client_stream); // skip \r\n       
+      req_buf_i += snprintf(req_buf2 + req_buf_i, BUF_SIZE, "$%d\r\n%s\r\n", char_cnt, STR_DATA(cmd.tokens[i]));
     }
-		DEBUG("\n");
 
-		char *command = tokens[0];
-		for (char *c = command; *c; ++c)
+		String command = cmd.tokens[0];
+		for (char *c = STR_DATA(command); *c; ++c)
 			*c = toupper(*c);
 
     if (append_only &&
-      (strcmp(command, "GET") != 0) &&
-      (strcmp(command, "ECHO") != 0))
+      (!c_str_eq(command, "GET")) &&
+      (!c_str_eq(command, "ECHO")))
     {
       FILE* fp = fopen(full_append_path, "a");
       fprintf(fp, "%s", req_buf2);
@@ -1208,27 +1214,27 @@ void *handle_client(void *arg)
 
 
     if (subscribe_mode &&
-      !(strcmp(command, "SUBSCRIBE") == 0 ||
-      strcmp(command, "UNSUBSCRIBE") == 0 ||
-      strcmp(command, "PSUBSCRIBE") == 0 ||
-      strcmp(command, "PUNSUBSCRIBE") == 0 ||
-      strcmp(command, "QUIT") == 0 ||
-      strcmp(command, "RESET") == 0))
+      !(c_str_eq(command, "SUBSCRIBE") ||
+      c_str_eq(command, "UNSUBSCRIBE") ||
+      c_str_eq(command, "PSUBSCRIBE") ||
+      c_str_eq(command, "PUNSUBSCRIBE") ||
+      c_str_eq(command, "QUIT") ||
+      c_str_eq(command, "RESET")))
     {
-      if (strcmp(command, "PING") == 0)
+      if (c_str_eq(command, "PING"))
         snprintf(output_buf, sizeof(output_buf), "*2\r\n$4\r\npong\r\n$0\r\n\r\n");
       else
         snprintf(output_buf, sizeof(output_buf),
           "-ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n",
-          command);
+          STR_DATA(command));
       write(client_sock, output_buf, strlen(output_buf));
       continue;
     }
 
-    if (in_transaction && 
-      ((strncmp(command, "SET", strlen("SET")) == 0) ||
-      (strncmp(command, "GET", strlen("GET")) == 0) ||
-      (strncmp(command, "INCR", strlen("INCR")) == 0)))
+    if (in_transaction &&
+      ((c_str_eq(command, "SET")) ||
+      (c_str_eq(command, "GET")) ||
+      (c_str_eq(command, "INCR"))))
     { 
       transactions[transaction_count++] = strdup(req_buf2);
       write(client_sock, "+QUEUED\r\n", strlen("+QUEUED\r\n"));
@@ -1236,47 +1242,47 @@ void *handle_client(void *arg)
     }
 
 
-    if (strcmp(command, "COMMAND") == 0)
+    if (c_str_eq(command, "COMMAND"))
     {
       write(client_sock, "+OK\r\n", strlen("+OK\r\n"));
       continue;
     }
 
-		if (strncmp(command, "PING", strlen("PING")) == 0)
+		if (c_str_eq(command, "PING"))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+PONG\r\n");
 		}
-		else if (strncmp(command, "ECHO", strlen("ECHO")) == 0)
+    else if (c_str_eq(command, "ECHO"))
 		{
-			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(tokens[1]), tokens[1]);
+			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", cmd.tokens[1].len, STR_DATA(cmd.tokens[1]));
 		}
-		else if (strncmp(command, "SET", strlen("SET")) == 0)
+		else if (c_str_eq(command, "SET"))
 		{
-			handle_set_command(output_buf, req_buf2, tokens);
-      Watched* tmp = get_watched(tokens[1]);
+			handle_set_command(output_buf, req_buf2, &cmd);
+      Watched* tmp = get_watched(STR_DATA(cmd.tokens[1]));
       if (tmp)
         tmp->socket = client_sock;
 		}
-		else if (strncmp(command, "GET", strlen("GET")) == 0)
+		else if (c_str_eq(command, "GET"))
 		{
-			handle_get_command(output_buf, req_buf2, tokens);
+			handle_get_command(output_buf, req_buf2, &cmd);
 		}
-		else if (strncmp(command, "INCR", strlen("INCR")) == 0)
+		else if (c_str_eq(command, "INCR"))
 		{
-			handle_incr_command(output_buf, req_buf2, tokens);
+			handle_incr_command(output_buf, req_buf2, &cmd);
 		}
 
-		else if (strncmp(command, "CONFIG", strlen("CONFIG")) == 0)
+		else if (c_str_eq(command, "CONFIG"))
 		{
-			if (strncmp(tokens[1], "GET", strlen("GET")) == 0)
+			if (c_str_eq(cmd.tokens[1], "GET"))
 			{  
-        char *get_opt = shget(config, tokens[2]);
+        char *get_opt = shget(config, STR_DATA(cmd.tokens[2]));
         snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
-          strlen(tokens[2]), tokens[2],
+          strlen(STR_DATA(cmd.tokens[2])), STR_DATA(cmd.tokens[2]),
           strlen(get_opt), get_opt);
 			}
 		}
-		else if (strncmp(command, "KEYS", strlen("KEYS")) == 0)
+		else if (c_str_eq(command, "KEYS"))
 		{
 			int offset = snprintf(output_buf, sizeof(output_buf), "*%d\r\n", db_map_size);
 			for (int i = 0; i < db_map_size && offset < sizeof(output_buf); ++i)
@@ -1285,7 +1291,7 @@ void *handle_client(void *arg)
 								   "$%lu\r\n%s\r\n", strlen(keys[i]), keys[i]);
 			}
 		}
-		else if ((strncmp(command, "INFO", strlen("INFO")) == 0))
+		else if (c_str_eq(command, "INFO"))
 		{
 			if (replication_port == 0)
 			{
@@ -1303,11 +1309,11 @@ void *handle_client(void *arg)
 			else
 				snprintf(output_buf, sizeof(output_buf), "$10\r\nrole:slave\r\n");
 		}
-		else if ((strncmp(command, "REPLCONF", strlen("REPLCONF")) == 0))
+		else if (c_str_eq(command, "REPLCONF"))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 		}
-		else if ((strncmp(command, "PSYNC", strlen("PSYNC")) == 0))
+		else if (c_str_eq(command, "PSYNC"))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n");
 			write(client_sock, output_buf, strlen(output_buf));
@@ -1318,7 +1324,7 @@ void *handle_client(void *arg)
 			DEBUG("replica_sock: %d\n", client_sock);
 			return 0;
 		}
-		else if ((strncmp(command, "WAIT", strlen("WAIT")) == 0))
+		else if (c_str_eq(command, "WAIT"))
 		{ 
 			if (did_propogate_to_replica == 0)
 			{ 
@@ -1327,8 +1333,8 @@ void *handle_client(void *arg)
 				continue;
 			}
 
-			int timeout_ms = atoi(tokens[2]);
-			int min_replica_processed_cnt = atoi(tokens[1]);
+			int timeout_ms = atoi(STR_DATA(cmd.tokens[2]));
+			int min_replica_processed_cnt = atoi(STR_DATA(cmd.tokens[1]));
 
 			DEBUG("replica_socks_cnt: %d\n", replica_socks_cnt);
 			DEBUG("min_replica_processed_cnt: %d\n", min_replica_processed_cnt);
@@ -1384,11 +1390,12 @@ void *handle_client(void *arg)
 					}
 				}
 			}
+
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", out);
 		}
-		else if ((strncmp(command, "TYPE", strlen("TYPE")) == 0))
+		else if (c_str_eq(command, "TYPE"))
 		{
-			Entry *val = hashmap_get_entry(map, tokens[1]);
+			Entry *val = hashmap_get_entry(map, STR_DATA(cmd.tokens[1]));
 			if (val)
 			{
 				if (val->type == TypeString)
@@ -1400,14 +1407,14 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "+none\r\n");
 			}
 		}
-		else if ((strncmp(command, "XADD", strlen("XADD")) == 0))
+		else if (c_str_eq(command, "XADD"))
 		{
-			char *entry_key = tokens[1];
-			char* ID = tokens[2];
+      char* entry_key = STR_DATA(cmd.tokens[1]);
+			char* ID = STR_DATA(cmd.tokens[2]);
 			uint64_t ms_time;
 			int sequence_num;
-			char *stream_key = tokens[3];
-			char *stream_val = tokens[4];
+			char *stream_key = STR_DATA(cmd.tokens[3]);
+			char *stream_val = STR_DATA(cmd.tokens[4]);
 
 			if (strncmp(ID, "*", 2) == 0)
 			{
@@ -1447,9 +1454,9 @@ void *handle_client(void *arg)
 				hashmap_put(map, entry_key, stream_str, UINT64_MAX, TypeStream);
 				
 				int stream_resp_offset = 0;
-				stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
-				for (int i = 3; i < query_cnt; ++i)
-					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", strlen(tokens[i]), tokens[i]);
+				stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, cmd.len - 3);
+				for (int i = 3; i < cmd.len; ++i)
+					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", cmd.tokens[i].len, STR_DATA(cmd.tokens[i]));
 
 				val = hashmap_get_entry(map, entry_key);
         val->stream = (StreamEntry*) calloc(1, sizeof(StreamEntry));
@@ -1492,9 +1499,9 @@ void *handle_client(void *arg)
 					}
 
 					int stream_resp_offset = 0;
-					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, query_cnt - 3);
-					for (int i = 3; i < query_cnt; ++i)
-						stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", strlen(tokens[i]), tokens[i]);
+					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, cmd.len - 3);
+					for (int i = 3; i < cmd.len; ++i)
+						stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", cmd.tokens[i].len, STR_DATA(cmd.tokens[i]));
 
           stream_entry->next = (StreamEntry*) calloc(1, sizeof(StreamEntry));
 					stream_entry = stream_entry->next;
@@ -1508,16 +1515,16 @@ void *handle_client(void *arg)
 				}
 			}
 		}
-		else if ((strncmp(command, "XRANGE", strlen("XRANGE")) == 0))
+		else if (c_str_eq(command, "XRANGE"))
 		{
 			
-			char *stream_key = tokens[1];
+			char *stream_key = STR_DATA(cmd.tokens[1]);
 			uint64_t start_time = 0, end_time;
       int start_seq = 0, end_seq = INT_MAX;
-      if (strncmp(tokens[2], "-", strlen("-")) != 0)
-        sscanf(tokens[2], "%lu-%d", &start_time, &start_seq);
+      if (!c_str_eq(cmd.tokens[2], "-"))
+        sscanf(STR_DATA(cmd.tokens[2]), "%lu-%d", &start_time, &start_seq);
 			
-			sscanf(tokens[3], "%lu-%d", &end_time, &end_seq);
+			sscanf(STR_DATA(cmd.tokens[3]), "%lu-%d", &end_time, &end_seq);
 			
 			char temp_buff[1024];
 			int offset = 0;
@@ -1537,25 +1544,25 @@ void *handle_client(void *arg)
 			}
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", matching_entries, temp_buff);
 		}
-		else if ((strncmp(command, "XREAD", strlen("XREAD")) == 0))
+		else if (c_str_eq(command, "XREAD"))
 		{
-			int stream_count = (query_cnt - 2) / 2;
-			handle_xread_command(output_buf, tokens, stream_count);
+			int stream_count = (cmd.len - 2) / 2;
+			handle_xread_command(output_buf, &cmd, stream_count);
 		}
 
-		else if (strncmp(command, "MULTI", strlen("MULTI")) == 0)
+		else if (c_str_eq(command, "MULTI"))
 		{
 			in_transaction = 1;
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 		}
 
-		else if (strncmp(command, "EXEC", strlen("EXEC")) == 0)
+		else if (c_str_eq(command, "EXEC"))
 		{
       handle_exec_command(output_buf, in_transaction, transactions, transaction_count, client_sock);
 			in_transaction = 0;
 			transaction_count = 0;
 		}
-		else if (strncmp(command, "DISCARD", strlen("DISCARD")) == 0)
+		else if (c_str_eq(command, "DISCARD"))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 			if (in_transaction == 0)
@@ -1564,53 +1571,53 @@ void *handle_client(void *arg)
 			transaction_count = 0;
       clear_watch_list();
 		}
-		else if (strncmp(command, "RPUSH", strlen("RPUSH")) == 0)
+		else if (c_str_eq(command, "RPUSH"))
 		{
-			char *listname = tokens[1];
+			char *listname = STR_DATA(cmd.tokens[1]);
 			Entry *list = hashmap_get_entry(map, listname);
 			if (list == NULL)
 			{
 				list = create_list(listname);
 			}
 
-			for (int i = 2; i < query_cnt; ++i)
-				list->list[list->list_cnt++] = strdup(tokens[i]);	 
+			for (int i = 2; i < cmd.len; ++i)
+				list->list[list->list_cnt++] = strdup(STR_DATA(cmd.tokens[i]));	 
 
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
 		}
-		else if (strncmp(command, "LPUSH", strlen("LPUSH")) == 0)
+		else if (c_str_eq(command, "LPUSH"))
 		{
-			char *listname = tokens[1];
+			char *listname = STR_DATA(cmd.tokens[1]);
 			Entry *list = hashmap_get_entry(map, listname);
 			if (list == NULL)
 			{
 				list = create_list(listname);
 			}
-			list->list -= (query_cnt - 2);
-			for (int i = query_cnt - 1, j = 0; i >= 2; --i)
+			list->list -= (cmd.len - 2);
+			for (int i = cmd.len - 1, j = 0; i >= 2; --i)
 			{
-				list->list[j++] = strdup(tokens[i]);
+				list->list[j++] = strdup(STR_DATA(cmd.tokens[i]));
 				list->list_cnt++;
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", list->list_cnt);
 		}
-		else if (strncmp(command, "LLEN", strlen("LLEN")) == 0)
+		else if (c_str_eq(command, "LLEN"))
 		{
-			char *listname = tokens[1];
+			char *listname = STR_DATA(cmd.tokens[1]);
 			Entry *list = hashmap_get_entry(map, listname);
 			int llen = 0;
 			if (list)
 				llen = list->list_cnt;
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", llen);
 		}
-		else if (strncmp(command, "LPOP", strlen("LPOP")) == 0)
+		else if (c_str_eq(command, "LPOP"))
 		{
-			char *listname = tokens[1];
+			char *listname = STR_DATA(cmd.tokens[1]);
 			Entry *list = hashmap_get_entry(map, listname);
 
 			int count = 1;
-			if (query_cnt == 3)
-				count = atoi(tokens[2]);
+			if (cmd.len == 3)
+				count = atoi(STR_DATA(cmd.tokens[2]));
 			if (list == NULL)
 			{
 				write(client_sock, "*0\r\n", strlen("*0\r\n"));
@@ -1629,13 +1636,13 @@ void *handle_client(void *arg)
 			list->list += count;
 			list->list_cnt -= count;
 		}
-		else if (strncmp(command, "BLPOP", strlen("BLPOP")) == 0)
+		else if (c_str_eq(command, "BLPOP"))
 		{
 			pthread_mutex_lock(&lpop_mutex);
-			char *listname = tokens[1];
+			char *listname = STR_DATA(cmd.tokens[1]);
 			float timeout_sec = 0;
-			if (query_cnt == 3)
-				timeout_sec = atof(tokens[2]);
+			if (cmd.len == 3)
+				timeout_sec = atof(STR_DATA(cmd.tokens[2]));
 			
 			Entry *list = hashmap_get_entry(map, listname);
 			if (list == NULL)
@@ -1662,11 +1669,11 @@ void *handle_client(void *arg)
 			}
 			pthread_mutex_unlock(&lpop_mutex);
 		}
-		else if (strncmp(command, "LRANGE", strlen("LRANGE")) == 0)
+		else if (c_str_eq(command, "LRANGE"))
 		{
-			char *listname = tokens[1];
-			int beg = atoi(tokens[2]);
-			int end = atoi(tokens[3]);
+			char *listname = STR_DATA(cmd.tokens[1]);
+			int beg = atoi(STR_DATA(cmd.tokens[2]));
+			int end = atoi(STR_DATA(cmd.tokens[3]));
 
 			Entry *list = hashmap_get_entry(map, listname);
 			if (list == NULL)
@@ -1701,29 +1708,29 @@ void *handle_client(void *arg)
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", count, temp);
 		}
 		
-		else if (strncmp(command, "SUBSCRIBE", strlen("SUBSCRIBE")) == 0)
+		else if (c_str_eq(command, "SUBSCRIBE"))
 		{
 			char sub[256];
-			snprintf(sub, sizeof(sub), "%d%s", client_sock, tokens[0]);
+			snprintf(sub, sizeof(sub), "%d%s", client_sock, STR_DATA(cmd.tokens[0]));
 			subscribe_mode = 1;
 			Entry *subscribe = hashmap_get_entry(map, sub);
 			if (subscribe == NULL)
 				subscribe = create_list(sub);
 
-			Entry *channel = hashmap_get_entry(map, tokens[1]);
+			Entry *channel = hashmap_get_entry(map, STR_DATA(cmd.tokens[1]));
 			if (channel == NULL)
-				channel = create_list(tokens[1]);
+				channel = create_list(STR_DATA(cmd.tokens[1]));
 			channel->list[channel->list_cnt++] = strdup(sub);
 
-			subscribe->list[subscribe->list_cnt++] = strdup(tokens[1]);
-			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("subscribe"), "subscribe", strlen(tokens[1]), tokens[1], subscribe->list_cnt);
+			subscribe->list[subscribe->list_cnt++] = strdup(STR_DATA(cmd.tokens[1]));
+			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("subscribe"), "subscribe", strlen(STR_DATA(cmd.tokens[1])), STR_DATA(cmd.tokens[1]), subscribe->list_cnt);
 		}
-		else if (strncmp(command, "UNSUBSCRIBE", strlen("UNSUBSCRIBE")) == 0)
+		else if (c_str_eq(command, "UNSUBSCRIBE"))
 		{
 			char sub[256];
 			snprintf(sub, sizeof(sub), "%dSUBSCRIBE", client_sock);
 
-			Entry *channel = hashmap_get_entry(map, tokens[1]);
+			Entry *channel = hashmap_get_entry(map, STR_DATA(cmd.tokens[1]));
 			for (int i = 0; i < channel->list_cnt; ++i)
 			{
 				if (strcmp(channel->list[i], sub) == 0)
@@ -1735,11 +1742,11 @@ void *handle_client(void *arg)
 
 			Entry *subscribe = hashmap_get_entry(map, sub);
 			subscribe->list_cnt--;
-			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("unsubscribe"), "unsubscribe", strlen(tokens[1]), tokens[1], subscribe->list_cnt);
+			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("unsubscribe"), "unsubscribe", strlen(STR_DATA(cmd.tokens[1])), STR_DATA(cmd.tokens[1]), subscribe->list_cnt);
 		}
-		else if (strncmp(command, "PUBLISH", strlen("PUBLISH")) == 0)
+		else if (c_str_eq(command, "PUBLISH"))
 		{
-			char *channel = tokens[1];
+			char *channel = STR_DATA(cmd.tokens[1]);
 			Entry *subscribe = hashmap_get_entry(map, channel);
 			int count = 0;
 			if (subscribe)
@@ -1749,23 +1756,23 @@ void *handle_client(void *arg)
 			{
 				int socket = atoi(subscribe->list[i]);
 				char temp[256];
-				snprintf(temp, sizeof(temp), "*3\r\n$7\r\nmessage\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(channel), channel, strlen(tokens[2]), tokens[2]);
+				snprintf(temp, sizeof(temp), "*3\r\n$7\r\nmessage\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(channel), channel, strlen(STR_DATA(cmd.tokens[2])), STR_DATA(cmd.tokens[2]));
 				write(socket, temp, strlen(temp));
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", count);
 		}
-		else if (strncmp(command, "ZADD", strlen("ZADD")) == 0)
+		else if (c_str_eq(command, "ZADD"))
 		{
-			char *zset_key = tokens[1];
-			double value = atof(tokens[2]);
-			char *zset_member = tokens[3];
+			char *zset_key = STR_DATA(cmd.tokens[1]);
+			double value = atof(STR_DATA(cmd.tokens[2]));
+			char *zset_member = STR_DATA(cmd.tokens[3]);
 			int res = insert_into_sorted_set(zset_key, zset_member, value);
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", res);
 		}
-		else if (strncmp(command, "ZRANK", strlen("ZRANK")) == 0)
+		else if (c_str_eq(command, "ZRANK"))
 		{
-			char *zset_key = tokens[1];
-			char *zset_member = tokens[2];
+			char *zset_key = STR_DATA(cmd.tokens[1]);
+			char *zset_member = STR_DATA(cmd.tokens[2]);
 			Entry *e = hashmap_get_entry(map, zset_key);
 			
 			snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
@@ -1778,11 +1785,11 @@ void *handle_client(void *arg)
 			}
 		}
 
-		else if (strncmp(command, "ZRANGE", strlen("ZRANGE")) == 0)
+		else if (c_str_eq(command, "ZRANGE"))
 		{
-			char *zset_key = tokens[1];
-			int beg = atoi(tokens[2]);
-			int end = atoi(tokens[3]);
+			char *zset_key = STR_DATA(cmd.tokens[1]);
+			int beg = atoi(STR_DATA(cmd.tokens[2]));
+			int end = atoi(STR_DATA(cmd.tokens[3]));
 			Entry *e = hashmap_get_entry(map, zset_key);
 
 			snprintf(output_buf, sizeof(output_buf), "*0\r\n");
@@ -1815,9 +1822,9 @@ void *handle_client(void *arg)
 				}				
 			}
 		}
-		else if (strncmp(command, "ZCARD", strlen("ZCARD")) == 0)
+		else if (c_str_eq(command, "ZCARD"))
 		{
-			char *zset_key = tokens[1];
+			char *zset_key = STR_DATA(cmd.tokens[1]);
 			Entry *e = hashmap_get_entry(map, zset_key);
 			snprintf(output_buf, sizeof(output_buf), ":0\r\n");
 			if (e)
@@ -1826,14 +1833,14 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), ":%d\r\n", total);
 			}
 		}
-		else if (strncmp(command, "ZSCORE", strlen("ZSCORE")) == 0)
+		else if (c_str_eq(command, "ZSCORE"))
 		{
 			snprintf(output_buf, sizeof(output_buf), "$-1\r\n");
-			char *zset_key = tokens[1];
+			char *zset_key = STR_DATA(cmd.tokens[1]);
 			Entry *e = hashmap_get_entry(map, zset_key);
 			if (e)
 			{ 
-				char *member_key = tokens[2];
+				char *member_key = STR_DATA(cmd.tokens[2]);
 
 				ZSetMember *member = zset_get(e->sorted_set, member_key);
 				char t_buf[256];
@@ -1841,10 +1848,10 @@ void *handle_client(void *arg)
 				snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(t_buf), t_buf);
 			}
 		}
-		else if (strncmp(command, "ZREM", strlen("ZREM")) == 0)
+		else if (c_str_eq(command, "ZREM"))
 		{
-			char *zset_key = tokens[1];
-			char *zset_member = tokens[2];
+			char *zset_key = STR_DATA(cmd.tokens[1]);
+			char *zset_member = STR_DATA(cmd.tokens[2]);
 			snprintf(output_buf, sizeof(output_buf), ":0\r\n");
 			Entry *e = hashmap_get_entry(map, zset_key);
 			if (e)
@@ -1859,12 +1866,12 @@ void *handle_client(void *arg)
 			}			
 		}
 
-		else if (strncmp(command, "GEOADD", strlen("GEOADD")) == 0)
+		else if (c_str_eq(command, "GEOADD"))
 		{
-			char *key = tokens[1];
-			double longitude = atof(tokens[2]);
-			double latitude = atof(tokens[3]);
-			char *member = tokens[4];
+			char *key = STR_DATA(cmd.tokens[1]);
+			double longitude = atof(STR_DATA(cmd.tokens[2]));
+			double latitude = atof(STR_DATA(cmd.tokens[3]));
+			char *member = STR_DATA(cmd.tokens[4]);
 			if (longitude < MIN_LONGITUDE || longitude > MAX_LONGITUDE || latitude < MIN_LATITUDE || latitude > MAX_LATITUDE)
 			{
 				write(client_sock, "-ERR invalid longitude,latitude pair\r\n" , strlen("-ERR invalid longitude,latitude pair\r\n"));
@@ -1874,16 +1881,16 @@ void *handle_client(void *arg)
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", res);
 		}
 
-		else if (strncmp(command, "GEOPOS", strlen("GEOPOS")) == 0)
+		else if (c_str_eq(command, "GEOPOS"))
 		{
-			char *key = tokens[1];
+			char *key = STR_DATA(cmd.tokens[1]);
 			snprintf(output_buf, sizeof(output_buf), "*1\r\n*-1\r\n");
 			Entry *entries = hashmap_get_entry(map, key);
-			int place_cnt = query_cnt - 2;
+			int place_cnt = cmd.len - 2;
 			int offset = snprintf(output_buf, sizeof(output_buf), "*%d\r\n", place_cnt);
-			for (int i = 2; i < query_cnt; ++i)
+			for (int i = 2; i < cmd.len; ++i)
 			{
-				char *member_key = tokens[i];
+				char *member_key = STR_DATA(cmd.tokens[i]);
 				ZSetMember *member = NULL;
 				if (entries)
 					member = zset_get(entries->sorted_set, member_key);
@@ -1906,13 +1913,13 @@ void *handle_client(void *arg)
 			}
 		}
 
-		else if (strncmp(command, "GEODIST", strlen("GEODIST")) == 0)
+		else if (c_str_eq(command, "GEODIST"))
 		{
 			const double EARTH_RADIUS_IN_METERS = 6372797.560856L;
 			
-			char *key = tokens[1];
-			char *city1 = tokens[2];
-			char *city2 = tokens[3];
+			char *key = STR_DATA(cmd.tokens[1]);
+			char *city1 = STR_DATA(cmd.tokens[2]);
+			char *city2 = STR_DATA(cmd.tokens[3]);
 
 			Entry *entries = hashmap_get_entry(map, key);
 
@@ -1939,15 +1946,15 @@ void *handle_client(void *arg)
 			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%s\r\n", strlen(dist_buf), dist_buf);			
 		}
 
-		else if (strncmp(command, "GEOSEARCH", strlen("GEOSEARCH")) == 0)
+		else if (c_str_eq(command, "GEOSEARCH"))
 		{
-			char *key = tokens[1];
-			char *from_what = tokens[2];
-			double longitude = atof(tokens[3]);
-			double latitude = atof(tokens[4]);
-			char *by_what = tokens[5];
-			double search_radius = atof(tokens[6]);
-			char *unit = tokens[7];
+			char *key = STR_DATA(cmd.tokens[1]);
+			char *from_what = STR_DATA(cmd.tokens[2]);
+			double longitude = atof(STR_DATA(cmd.tokens[3]));
+			double latitude = atof(STR_DATA(cmd.tokens[4]));
+			char *by_what = STR_DATA(cmd.tokens[5]);
+			double search_radius = atof(STR_DATA(cmd.tokens[6]));
+			char *unit = STR_DATA(cmd.tokens[7]);
 			
 			snprintf(output_buf, sizeof(output_buf), "*0\r\n");
 
@@ -1982,47 +1989,47 @@ void *handle_client(void *arg)
 
 			snprintf(output_buf, sizeof(output_buf), "*%d\r\n%s", found, temp_buf);
 		}
-    else if (strncmp(command, "ACL", strlen("ACL")) == 0)
+    else if (c_str_eq(command, "ACL"))
     {
-      if (strncmp(tokens[1], "WHOAMI", strlen("WHOAMI")) == 0)
+      if (c_str_eq(cmd.tokens[1], "WHOAMI"))
       {
         if (hashmap_get(map, "userid:default") && !authenticated)
           strcpy(output_buf, "-NOAUTH Authentication required\r\n");
         else
           strcpy(output_buf, "$7\r\ndefault\r\n");
-      } else if (strncmp(tokens[1], "GETUSER", strlen("GETUSER")) == 0)
+      } else if (c_str_eq(cmd.tokens[1], "GETUSER"))
       {
         char username[256];
-        snprintf(username, sizeof(username), "userid:%s", tokens[2]);
+        snprintf(username, sizeof(username), "userid:%s", STR_DATA(cmd.tokens[2]));
         char* pass = hashmap_get(map, username);
         if (pass)
           snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*0\r\n$9\r\npasswords\r\n*1\r\n$%ld\r\n%s\r\n", strlen(pass), pass);
         else
           snprintf(output_buf, sizeof(output_buf), "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n");
-      } else if (strncmp(tokens[1], "SETUSER", strlen("SETUSER")) == 0)
+      } else if (c_str_eq(cmd.tokens[1], "SETUSER"))
       {
         char hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
-        get_hashed_str((const BYTE*) (tokens[3] + 1) /*skipping > */, hashed_pass);
+        get_hashed_str((const BYTE*) (STR_DATA(cmd.tokens[3]) + 1) /*skipping > */, hashed_pass);
 
         char username[256];
-        snprintf(username, sizeof(username), "userid:%s", tokens[2]);
+        snprintf(username, sizeof(username), "userid:%s", STR_DATA(cmd.tokens[2]));
         hashmap_put(map, username, hashed_pass, UINT64_MAX, TypeString);
 
         strcpy(output_buf, "+OK\r\n");
         authenticated = 1;
       }
     }
-    else if (strncmp(command, "AUTH", strlen("AUTH")) == 0)
+    else if (c_str_eq(command, "AUTH"))
     {
       strcpy(output_buf, "-WRONGPASS invalid username-password pair or user is disabled.\r\n");
 
       char username[256];
-      snprintf(username, sizeof(username), "userid:%s", tokens[1]);
+      snprintf(username, sizeof(username), "userid:%s", STR_DATA(cmd.tokens[1]));
       char* pass = hashmap_get(map, username);
       if (pass)
       {
         char hashed_pass[SHA256_BLOCK_SIZE * 2 + 1];
-        get_hashed_str((const BYTE*) tokens[2], hashed_pass);
+        get_hashed_str((const BYTE*) STR_DATA(cmd.tokens[2]), hashed_pass);
         if (strcmp(hashed_pass, pass) == 0)
         {
           strcpy(output_buf, "+OK\r\n");
@@ -2030,18 +2037,18 @@ void *handle_client(void *arg)
         }
       }
     }
-    else if (strncmp(command, "WATCH", strlen("WATCH")) == 0)
+    else if (c_str_eq(command, "WATCH"))
     {
       if (in_transaction)
         strcpy(output_buf, "-ERR WATCH inside MULTI is not allowed\r\n");
       else
       {
-        for (int i = 1; i < query_cnt; ++i)
-          push_watched(&watch_head, tokens[i], client_sock);
+        for (int i = 1; i < cmd.len; ++i)
+          push_watched(&watch_head, STR_DATA(cmd.tokens[i]), client_sock);
         strcpy(output_buf, "+OK\r\n");
       }
     }
-    else if (strncmp(command, "UNWATCH", strlen("UNWATCH")) == 0)
+    else if (c_str_eq(command, "UNWATCH"))
     {
       clear_watch_list();
       strcpy(output_buf, "+OK\r\n");

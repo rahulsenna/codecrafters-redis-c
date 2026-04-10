@@ -32,27 +32,37 @@ ConfigMap* config = NULL;
 
 #include <signal.h>
 #include <execinfo.h>
+
+uintptr_t get_load_address()
+{
+  FILE* f = fopen("/proc/self/maps", "r");
+  if (!f) return 0;
+
+  uintptr_t addr = 0;
+  if (fscanf(f, "%lx", &addr) != 1)
+    addr = 0;
+  fclose(f);
+  return addr;
+}
+
 void crash_handler(int signum)
 {
   void* bt[32];
   int size = backtrace(bt, 32);
-  char** syms = backtrace_symbols(bt, size);
+  uintptr_t base_addr = get_load_address();
 
   fprintf(stderr, "=== CRASH (signal %d) ===\n", signum);
 
-  char cmd[512];
   for (int i = 0; i < size; i++)
   {
-    fprintf(stderr, "%s\n", syms[i]);
-
-    snprintf(cmd, sizeof(cmd),
-      "addr2line -e /proc/%d/exe -f -i -p %p 1>&2", getpid(), bt[i]);
+    uintptr_t addr = (uintptr_t) bt[i];
+    uintptr_t offset = (addr > base_addr) ? (addr - base_addr) : addr;
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "addr2line -pfi -e /proc/%d/exe 0x%lx 1>&2", getpid(), offset);
+    if (i == 0) fprintf(stderr, "Debug Cmd: %s\n", cmd);
     system(cmd);
   }
-
-  free(syms);
-  signal(signum, SIG_DFL);
-  raise(signum);
+  exit(1);
 }
 
 void setup_crash_handler(void)

@@ -56,6 +56,7 @@ static inline String _str_cpy(const char* cstr, size_t n)
   return out;
 }
 
+/* init *String* from length, fill in data later */
 static inline String str_init_len(size_t n)
 {
   String out = { 0 };

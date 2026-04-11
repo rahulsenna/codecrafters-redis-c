@@ -36,8 +36,72 @@ ConfigMap* config = NULL;
 typedef struct Resp
 {
   String tokens[MAX_TOKEN_COUNT];
-  size_t len;
+  uint32_t len;
 } Resp;
+
+typedef struct Transaction
+{
+  Resp** data;
+  uint32_t len;
+  uint32_t cap;
+} Transaction;
+
+Transaction init_transaction()
+{
+  Transaction t = { 0 };
+  t.cap = 10;
+  t.len = 0;
+  t.data = (Resp**) malloc(sizeof(Resp*) * t.cap);
+  return t;
+}
+
+Resp* deep_cpy_resp(Resp* cmd)
+{
+  Resp* out = (Resp*) malloc(sizeof(Resp));
+  out->len = cmd->len;
+  for (size_t i = 0; i < out->len; ++i)
+  {
+    out->tokens[i] = _str_cpy(STR_DATA(cmd->tokens[i]), cmd->tokens[i].len);
+  }
+  return out;
+}
+
+void push_transaction(Transaction* t, Resp* cmd)
+{
+  if ((t->len + 1) > t->cap)
+  {
+    t->cap *= 2;
+    t->data = (Resp**) realloc(t->data, sizeof(Resp*) * t->cap);
+  }
+  t->data[t->len++] = deep_cpy_resp(cmd);
+}
+
+void free_resp(Resp* r)
+{
+  if (!r) return;
+
+  for (size_t i = 0; i < r->len; ++i)
+  {
+    STR_FREE(r->tokens[i]);
+  }
+  free(r);
+}
+
+void free_transaction(Transaction* t)
+{
+  if (!t || !t->data) return;
+
+  for (uint32_t i = 0; i < t->len; ++i)
+  {
+    free_resp(t->data[i]);
+  }
+
+  free(t->data);
+
+  t->data = NULL;
+  t->len = 0;
+  t->cap = 0;
+}
 
 #include <signal.h>
 #include <execinfo.h>
@@ -632,7 +696,7 @@ int did_propogate_to_replica = 0;
 
 #define BUF_SIZE 1024
 
-void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
+void handle_get_command(char output_buf[BUF_SIZE], Resp *cmd)
 {
 	Entry *val = hashmap_get_entry(map, STR_DATA(cmd->tokens[1]));
 
@@ -644,7 +708,7 @@ void handle_get_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
 		snprintf(output_buf, BUF_SIZE, "$-1\r\n");
 }
 
-void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
+void handle_set_command(char output_buf[BUF_SIZE], Resp *cmd)
 {
 	uint64_t expiry_time = UINT64_MAX;
 	
@@ -659,13 +723,23 @@ void handle_set_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
 	snprintf(output_buf, BUF_SIZE, "+OK\r\n");
 
 	did_propogate_to_replica = replica_socks_cnt;
-	for (int i = 0; i < replica_socks_cnt; ++i)
-	{
-		write(replica_socks[i], req_buf2, strlen(req_buf2)); 
-	}
+
+  if (replica_socks_cnt)
+  {
+    char raw_resp[512];
+    size_t raw_resp_size = snprintf(raw_resp, sizeof(raw_resp), "*%u\r\n", cmd->len);
+
+    for (int i = 0; i < cmd->len; i++)
+      raw_resp_size += snprintf(raw_resp + raw_resp_size, sizeof(raw_resp), "$%zu\r\n%s\r\n", cmd->tokens[i].len, STR_DATA(cmd->tokens[i]));
+
+    for (int i = 0; i < replica_socks_cnt; ++i)
+    {
+      write(replica_socks[i], raw_resp, raw_resp_size);
+    }
+  }
 }
 
-void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
+void handle_incr_command(char output_buf[BUF_SIZE], Resp *cmd)
 {	
 	Entry *val = hashmap_get_entry(map, STR_DATA(cmd->tokens[1]));
 
@@ -692,14 +766,14 @@ void handle_incr_command(char output_buf[BUF_SIZE], char *req_buf2, Resp *cmd)
 	}
 }
 
-void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_queue[100], int trans_queue_cnt, int client_socket)
+void handle_exec_command(char output_buf[BUF_SIZE], int in_transaction, Transaction *t, int client_socket)
 {
-	if (is_multi == 0)
+	if (in_transaction == 0)
 	{
 		snprintf(output_buf, BUF_SIZE, "-ERR EXEC without MULTI\r\n");
 		return;
 	}
-	if (trans_queue_cnt == 0)
+	if (t->len == 0)
 	{
 		snprintf(output_buf, BUF_SIZE, "*0\r\n");
 		return;
@@ -728,43 +802,22 @@ void handle_exec_command(char output_buf[BUF_SIZE], int is_multi, char *trans_qu
     return;
   }
 
-	is_multi = 0;
 	char exec_output_buf[BUF_SIZE];
-	int buf_offset = snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", trans_queue_cnt);
-	for (int trans_idx = 0; trans_idx < trans_queue_cnt; ++trans_idx)
+	int buf_offset = snprintf(exec_output_buf, BUF_SIZE, "*%d\r\n", t->len);
+	for (int trans_idx = 0; trans_idx < t->len; ++trans_idx)
 	{
-    Resp cmd = { 0 };
-		char req_buf2[BUF_SIZE];
-		memcpy(req_buf2, trans_queue[trans_idx], BUF_SIZE);
-
-    char* ptr = trans_queue[trans_idx];
-    int offset;
-    sscanf(ptr, "*%d\r\n%n", &cmd.len, &offset);
-    ptr += offset;
-    for (int i = 0; i < cmd.len; ++i)
-    {
-      int char_cnt;
-      sscanf(ptr, "$%d\r\n%n", &char_cnt, &offset);
-      ptr += offset;
-      
-      cmd.tokens[i] = _str_cpy(ptr, char_cnt);
-      STR_DATA(cmd.tokens[i])[char_cnt] = 0;
-      ptr += char_cnt + 2; // + /r/n
-    }
-
-		String command = cmd.tokens[0];
-		for (char *c = STR_DATA(command); *c; ++c)
-			*c = toupper(*c);
+    Resp* cmd = t->data[trans_idx];
+    String command = cmd->tokens[0];
 
 		if (c_str_eq(command, "SET"))
-			handle_set_command(output_buf, req_buf2, &cmd);
+			handle_set_command(output_buf, cmd);
 		else if (c_str_eq(command, "INCR"))
-			handle_incr_command(output_buf, req_buf2, &cmd);
+			handle_incr_command(output_buf, cmd);
 		else if (c_str_eq(command, "GET"))
-			handle_get_command(output_buf, req_buf2, &cmd);
+			handle_get_command(output_buf, cmd);
 		
 		buf_offset += snprintf(exec_output_buf+buf_offset, BUF_SIZE, "%s", output_buf);
-		free(trans_queue[trans_idx]);
+
 	}
 	strcpy(output_buf, exec_output_buf);
   next_cmd:;
@@ -1180,8 +1233,7 @@ void *handle_client(void *arg)
   char output_buf[BUF_SIZE * 2];
 
   int in_transaction = 0;
-  char* transactions[100];
-  int transaction_count = 0;
+  Transaction transaction = init_transaction();
   
   Resp cmd = { 0 };
   FILE* client_stream = fdopen(client_sock, "r+");
@@ -1236,7 +1288,7 @@ void *handle_client(void *arg)
       (c_str_eq(command, "GET")) ||
       (c_str_eq(command, "INCR"))))
     { 
-      transactions[transaction_count++] = strdup(req_buf2);
+      push_transaction(&transaction, &cmd);
       write(client_sock, "+QUEUED\r\n", strlen("+QUEUED\r\n"));
     	continue;
     }
@@ -1258,18 +1310,18 @@ void *handle_client(void *arg)
 		}
 		else if (c_str_eq(command, "SET"))
 		{
-			handle_set_command(output_buf, req_buf2, &cmd);
+			handle_set_command(output_buf, &cmd);
       Watched* tmp = get_watched(STR_DATA(cmd.tokens[1]));
       if (tmp)
         tmp->socket = client_sock;
 		}
 		else if (c_str_eq(command, "GET"))
 		{
-			handle_get_command(output_buf, req_buf2, &cmd);
+			handle_get_command(output_buf, &cmd);
 		}
 		else if (c_str_eq(command, "INCR"))
 		{
-			handle_incr_command(output_buf, req_buf2, &cmd);
+			handle_incr_command(output_buf, &cmd);
 		}
 
 		else if (c_str_eq(command, "CONFIG"))
@@ -1558,9 +1610,9 @@ void *handle_client(void *arg)
 
 		else if (c_str_eq(command, "EXEC"))
 		{
-      handle_exec_command(output_buf, in_transaction, transactions, transaction_count, client_sock);
+      handle_exec_command(output_buf, in_transaction, &transaction, client_sock);
 			in_transaction = 0;
-			transaction_count = 0;
+      free_transaction(&transaction);
 		}
 		else if (c_str_eq(command, "DISCARD"))
 		{
@@ -1568,7 +1620,7 @@ void *handle_client(void *arg)
 			if (in_transaction == 0)
 				snprintf(output_buf, sizeof(output_buf), "-ERR DISCARD without MULTI\r\n");
 			in_transaction = 0;
-			transaction_count = 0;
+			free_transaction(&transaction);
       clear_watch_list();
 		}
 		else if (c_str_eq(command, "RPUSH"))

@@ -83,7 +83,7 @@ static inline char* str_data(String* s)
 {
   return s->kind == STR_KIND_SSO ? s->buf : s->ptr;
 }
-#define STR_DATA(s) (str_data(&s))
+#define PSTR(s) (str_data(&s))
 
 #define STR_FREE(s)                     \
     do {                                \

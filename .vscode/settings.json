@@ -3,7 +3,7 @@
 
     "memory-view.showMemoryPanel": true,
     "[c]":{
-        "editor.lineNumbers": "off"
+        // "editor.lineNumbers": "off"
     },
     "[plaintext]":{
         "editor.lineNumbers": "off",

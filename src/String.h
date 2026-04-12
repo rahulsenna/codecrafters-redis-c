@@ -164,11 +164,11 @@ static inline String str_view(char* s)
 
 static inline int str_eq(String a, String b)
 {
-  return a.len == b.len && memcmp(str_data(&a), str_data(&b), a.len) == 0;
+  return a.len == b.len && *str_data(&a) == *str_data(&b) && memcmp(str_data(&a), str_data(&b), a.len) == 0;
 }
 static inline int c_str_eq(String a, char* b)
 {
-  return a.len == strlen(b) && memcmp(str_data(&a), b, a.len) == 0;
+  return a.len == strlen(b) && *str_data(&a) == *b && memcmp(str_data(&a), b, a.len) == 0;
 }
 
 static inline int _str_reserve(String* s, size_t need)

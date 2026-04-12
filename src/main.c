@@ -1232,25 +1232,28 @@ void *handle_client(void *arg)
   free(arg);
   DEBUG("Client connected - port: %d - client_sock: %d\n", port, client_sock);
 
-  char req_buf2[BUF_SIZE];
+  char req_buf[BUF_SIZE];
   char output_buf[BUF_SIZE * 2];
 
   Transaction transaction = init_transaction();
   
   Resp cmd = { 0 };
-  FILE* client_stream = fdopen(client_sock, "r+");
-  if (!client_stream) return 0;
-  while (fscanf(client_stream, "*%d\r\n", &cmd.len) == 1)
+  ssize_t bytes_read = 0;
+  ssize_t bytes_processed = 0; 
+
+  while (bytes_read > bytes_processed || (bytes_read = bytes_processed = 0, bytes_read += read(client_sock, req_buf, BUF_SIZE)))
   {
-    size_t req_buf_i = snprintf(req_buf2, BUF_SIZE, "*%d\r\n", cmd.len);
+    req_buf[bytes_read] = 0;
+    int offset;
+    sscanf(req_buf+bytes_processed, "*%d\r\n%n", &cmd.len, &offset);
+    bytes_processed += offset;
     for (int i = 0; i < cmd.len; ++i)
     {
       int char_cnt;
-      fscanf(client_stream, "$%d\r\n", &char_cnt);
-      cmd.tokens[i] = str_init_len(char_cnt);
-      fread(STR_DATA(cmd.tokens[i]), sizeof(char), char_cnt, client_stream);
-      fgetc(client_stream); fgetc(client_stream); // skip \r\n       
-      req_buf_i += snprintf(req_buf2 + req_buf_i, BUF_SIZE, "$%d\r\n%s\r\n", char_cnt, STR_DATA(cmd.tokens[i]));
+      sscanf(req_buf+bytes_processed, "$%d\r\n%n", &char_cnt, &offset);
+      bytes_processed += offset;
+      cmd.tokens[i] = _str_cpy((const char*) req_buf + bytes_processed, char_cnt);
+      bytes_processed += char_cnt + 2;
     }
 
 		String command = cmd.tokens[0];
@@ -1262,7 +1265,7 @@ void *handle_client(void *arg)
       (!c_str_eq(command, "ECHO")))
     {
       FILE* fp = fopen(full_append_path, "a");
-      fprintf(fp, "%s", req_buf2);
+      fprintf(fp, "%s", req_buf);
       fclose(fp);
     }
 

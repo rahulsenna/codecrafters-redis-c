@@ -44,6 +44,7 @@ typedef struct Transaction
   Resp** data;
   uint32_t len;
   uint32_t cap;
+  uint8_t active;
 } Transaction;
 
 Transaction init_transaction()
@@ -51,6 +52,7 @@ Transaction init_transaction()
   Transaction t = { 0 };
   t.cap = 10;
   t.len = 0;
+  t.active = 0;
   t.data = (Resp**) malloc(sizeof(Resp*) * t.cap);
   return t;
 }
@@ -101,6 +103,7 @@ void free_transaction(Transaction* t)
   t->data = NULL;
   t->len = 0;
   t->cap = 0;
+  t->active = 0;
 }
 
 #include <signal.h>
@@ -766,9 +769,9 @@ void handle_incr_command(char output_buf[BUF_SIZE], Resp *cmd)
 	}
 }
 
-void handle_exec_command(char output_buf[BUF_SIZE], int in_transaction, Transaction *t, int client_socket)
+void handle_exec_command(char output_buf[BUF_SIZE], Transaction *t, int client_socket)
 {
-	if (in_transaction == 0)
+	if (!t->active)
 	{
 		snprintf(output_buf, BUF_SIZE, "-ERR EXEC without MULTI\r\n");
 		return;
@@ -1232,7 +1235,6 @@ void *handle_client(void *arg)
   char req_buf2[BUF_SIZE];
   char output_buf[BUF_SIZE * 2];
 
-  int in_transaction = 0;
   Transaction transaction = init_transaction();
   
   Resp cmd = { 0 };
@@ -1283,7 +1285,7 @@ void *handle_client(void *arg)
       continue;
     }
 
-    if (in_transaction &&
+    if (transaction.active &&
       ((c_str_eq(command, "SET")) ||
       (c_str_eq(command, "GET")) ||
       (c_str_eq(command, "INCR"))))
@@ -1604,22 +1606,20 @@ void *handle_client(void *arg)
 
 		else if (c_str_eq(command, "MULTI"))
 		{
-			in_transaction = 1;
+			transaction.active = 1;
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
 		}
 
 		else if (c_str_eq(command, "EXEC"))
 		{
-      handle_exec_command(output_buf, in_transaction, &transaction, client_sock);
-			in_transaction = 0;
+      handle_exec_command(output_buf, &transaction, client_sock);
       free_transaction(&transaction);
 		}
 		else if (c_str_eq(command, "DISCARD"))
 		{
 			snprintf(output_buf, sizeof(output_buf), "+OK\r\n");
-			if (in_transaction == 0)
+			if (!transaction.active)
 				snprintf(output_buf, sizeof(output_buf), "-ERR DISCARD without MULTI\r\n");
-			in_transaction = 0;
 			free_transaction(&transaction);
       clear_watch_list();
 		}
@@ -2091,7 +2091,7 @@ void *handle_client(void *arg)
     }
     else if (c_str_eq(command, "WATCH"))
     {
-      if (in_transaction)
+      if (transaction.active)
         strcpy(output_buf, "-ERR WATCH inside MULTI is not allowed\r\n");
       else
       {

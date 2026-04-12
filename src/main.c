@@ -63,7 +63,7 @@ Resp* deep_cpy_resp(Resp* cmd)
   out->len = cmd->len;
   for (size_t i = 0; i < out->len; ++i)
   {
-    out->tokens[i] = _str_cpy(PSTR(cmd->tokens[i]), cmd->tokens[i].len);
+    out->tokens[i] = _str_cpy(PSTR(cmd->tokens[i]), LSTR(cmd->tokens[i]));
   }
   return out;
 }
@@ -733,7 +733,7 @@ void handle_set_command(char output_buf[BUF_SIZE], Resp *cmd)
     size_t raw_resp_size = snprintf(raw_resp, sizeof(raw_resp), "*%u\r\n", cmd->len);
 
     for (int i = 0; i < cmd->len; i++)
-      raw_resp_size += snprintf(raw_resp + raw_resp_size, sizeof(raw_resp), "$%zu\r\n%s\r\n", cmd->tokens[i].len, PSTR(cmd->tokens[i]));
+      raw_resp_size += snprintf(raw_resp + raw_resp_size, sizeof(raw_resp), "$%zu\r\n%s\r\n", LSTR(cmd->tokens[i]), PSTR(cmd->tokens[i]));
 
     for (int i = 0; i < replica_socks_cnt; ++i)
     {
@@ -1309,7 +1309,7 @@ void *handle_client(void *arg)
 		}
     else if (c_str_eq(command, "ECHO"))
 		{
-			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%.*s\r\n", cmd.tokens[1].len, (int)cmd.tokens[1].len, PSTR(cmd.tokens[1]));
+			snprintf(output_buf, sizeof(output_buf), "$%lu\r\n%.*s\r\n", LSTR(cmd.tokens[1]), (int)LSTR(cmd.tokens[1]), PSTR(cmd.tokens[1]));
 		}
 		else if (c_str_eq(command, "SET"))
 		{
@@ -1333,7 +1333,7 @@ void *handle_client(void *arg)
 			{  
         char *get_opt = shget(config, PSTR(cmd.tokens[2]));
         snprintf(output_buf, sizeof(output_buf), "*2\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n",
-          cmd.tokens[2].len, PSTR(cmd.tokens[2]),
+          LSTR(cmd.tokens[2]), PSTR(cmd.tokens[2]),
           strlen(get_opt), get_opt);
 			}
 		}
@@ -1511,7 +1511,7 @@ void *handle_client(void *arg)
 				int stream_resp_offset = 0;
 				stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, cmd.len - 3);
 				for (int i = 3; i < cmd.len; ++i)
-					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", cmd.tokens[i].len, PSTR(cmd.tokens[i]));
+					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", LSTR(cmd.tokens[i]), PSTR(cmd.tokens[i]));
 
 				val = hashmap_get_entry(map, entry_key);
         val->stream = (StreamEntry*) calloc(1, sizeof(StreamEntry));
@@ -1556,7 +1556,7 @@ void *handle_client(void *arg)
 					int stream_resp_offset = 0;
 					stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "*2\r\n$%lu\r\n%s\r\n*%d\r\n", strlen(new_id), new_id, cmd.len - 3);
 					for (int i = 3; i < cmd.len; ++i)
-						stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", cmd.tokens[i].len, PSTR(cmd.tokens[i]));
+						stream_resp_offset += snprintf(stream_resp+stream_resp_offset, sizeof(stream_resp), "$%lu\r\n%s\r\n", LSTR(cmd.tokens[i]), PSTR(cmd.tokens[i]));
 
           stream_entry->next = (StreamEntry*) calloc(1, sizeof(StreamEntry));
 					stream_entry = stream_entry->next;
@@ -1776,7 +1776,7 @@ void *handle_client(void *arg)
 			channel->list[channel->list_cnt++] = strdup(sub);
 
 			subscribe->list[subscribe->list_cnt++] = strdup(PSTR(cmd.tokens[1]));
-			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("subscribe"), "subscribe", cmd.tokens[1].len, PSTR(cmd.tokens[1]), subscribe->list_cnt);
+			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("subscribe"), "subscribe", LSTR(cmd.tokens[1]), PSTR(cmd.tokens[1]), subscribe->list_cnt);
 		}
 		else if (c_str_eq(command, "UNSUBSCRIBE"))
 		{
@@ -1795,7 +1795,7 @@ void *handle_client(void *arg)
 
 			Entry *subscribe = hashmap_get_entry(map, sub);
 			subscribe->list_cnt--;
-			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("unsubscribe"), "unsubscribe", cmd.tokens[1].len, PSTR(cmd.tokens[1]), subscribe->list_cnt);
+			snprintf(output_buf, sizeof(output_buf), "*3\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n:%d\r\n", strlen("unsubscribe"), "unsubscribe", LSTR(cmd.tokens[1]), PSTR(cmd.tokens[1]), subscribe->list_cnt);
 		}
 		else if (c_str_eq(command, "PUBLISH"))
 		{
@@ -1809,7 +1809,7 @@ void *handle_client(void *arg)
 			{
 				int socket = atoi(subscribe->list[i]);
 				char temp[256];
-				snprintf(temp, sizeof(temp), "*3\r\n$7\r\nmessage\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(channel), channel, cmd.tokens[2].len, PSTR(cmd.tokens[2]));
+				snprintf(temp, sizeof(temp), "*3\r\n$7\r\nmessage\r\n$%lu\r\n%s\r\n$%lu\r\n%s\r\n", strlen(channel), channel, LSTR(cmd.tokens[2]), PSTR(cmd.tokens[2]));
 				write(socket, temp, strlen(temp));
 			}
 			snprintf(output_buf, sizeof(output_buf), ":%d\r\n", count);

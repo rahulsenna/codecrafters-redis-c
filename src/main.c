@@ -2133,6 +2133,7 @@ int main(int argc, char *argv[]) {
   shput(config, "appendonly", (char*) "no");
   shput(config, "appenddirname", (char*) "appendonlydir");
   shput(config, "appendfilename", (char*) "appendonly.aof");
+  shput(config, "appendfsync", (char*) "everysec");
 
 	for (int i = 1; i < argc; i+=2)
 	{
@@ -2158,6 +2159,10 @@ int main(int argc, char *argv[]) {
     if (strncmp(argv[i], "--appendonly", strlen("--appendonly")) == 0)
 		{
       shput(config, "appendonly", argv[i + 1]);
+		}
+    if (strncmp(argv[i], "--appendfsync", strlen("--appendfsync")) == 0)
+		{
+      shput(config, "appendfsync", argv[i + 1]);
 		}
     if (strncmp(argv[i], "--appenddirname", strlen("--appenddirname")) == 0)
 		{

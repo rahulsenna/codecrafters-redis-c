@@ -140,7 +140,7 @@ static inline String _str_from_cstr(const char* s)
   return _str_cpy(s, strlen(s));
 }
 
-static inline String _str_view_from_cstr(char* s)
+static inline String _str_view_from_cstr(const char* s)
 {
   return _str_view(s, strlen(s));
 }
@@ -278,5 +278,15 @@ static inline int str_cat(String* dst, String *src)
   return 1;
 }
 
+static inline int c_str_cat(String* dst, const char *src)
+{
+  String s = str(src);
+  int res = str_cat(dst, &s);
+  STR_FREE(s);
+  return res;
+}
 
-#define str_empty(s)  (str_len(&(s)) == 0)
+static inline int str_empty(String s)
+{
+  return str_len(&s) == 0;
+}

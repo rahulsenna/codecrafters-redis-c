@@ -2124,7 +2124,6 @@ int main(int argc, char *argv[]) {
 
 	map = hashmap_create();
 
-	port = 6379;
 	replication_port = 0;
 
   char cwd[PATH_MAX / 2];
@@ -2134,46 +2133,28 @@ int main(int argc, char *argv[]) {
   shput(config, "appenddirname", (char*) "appendonlydir");
   shput(config, "appendfilename", (char*) "appendonly.aof");
   shput(config, "appendfsync", (char*) "everysec");
+  shput(config, "port", (char*) "6379");
 
 	for (int i = 1; i < argc; i+=2)
 	{
+    shput(config, argv[i] + 2 /* skip -- */, argv[i + 1]);
+
 		if (strncmp(argv[i], "--replicaof", strlen("--replicaof")) == 0)
-		{
-      shput(config, "replicaof", argv[i + 1]);
+		{      
 			sscanf(argv[i + 1], "%*s %d", &replication_port);
 		}
-		if (strncmp(argv[i], "--port", strlen("--port")) == 0)
+		else if (strncmp(argv[i], "--dir", strlen("--dir")) == 0)
 		{
-			port = atoi(argv[i+1]);
-		}
-		if (strncmp(argv[i], "--dir", strlen("--dir")) == 0)
-		{
-      shput(config, "dir", argv[i + 1]);
       mkdir((char*) argv[i + 1], 0755);
 		}
-
-		if (strncmp(argv[i], "--dbfilename", strlen("--dbfilename")) == 0)
+    else if (strncmp(argv[i], "--appenddirname", strlen("--appenddirname")) == 0)
 		{
-      shput(config, "dbfilename", argv[i + 1]);
-		}
-    if (strncmp(argv[i], "--appendonly", strlen("--appendonly")) == 0)
-		{
-      shput(config, "appendonly", argv[i + 1]);
-		}
-    if (strncmp(argv[i], "--appendfsync", strlen("--appendfsync")) == 0)
-		{
-      shput(config, "appendfsync", argv[i + 1]);
-		}
-    if (strncmp(argv[i], "--appenddirname", strlen("--appenddirname")) == 0)
-		{
-      shput(config, "appenddirname", argv[i + 1]);
       snprintf(cwd, PATH_MAX, "%s/%s", shget(config, "dir"), argv[i + 1]);
       mkdir((char*) cwd, 0755);
 		}
-    if (strncmp(argv[i], "--appendfilename", strlen("--appendfilename")) == 0)
+    else if (strncmp(argv[i], "--appendfilename", strlen("--appendfilename")) == 0)
 		{
       append_only = 1;
-      shput(config, "appendfilename", argv[i + 1]);
       snprintf(full_append_path, PATH_MAX, "%s/%s.1.incr.aof", cwd, argv[i + 1]);
       FILE* fp = fopen(full_append_path, "a");
       if (fp != NULL)
@@ -2206,6 +2187,8 @@ int main(int argc, char *argv[]) {
         fclose(fp);
 		}
 	}
+
+  port = atoi(shget(config, "port"));
 
 	DEBUG("Config[ArgDirName]: %s\n", shget(config, "dir"));
 	DEBUG("Config[ArgFileName]: %s\n", shget(config, "dbfilename"));
